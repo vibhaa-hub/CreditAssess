@@ -1,0 +1,6 @@
+{
+  "name": "ApexCredit - Commercial Credit Assessment Gateway",
+  "description": "Enterprise decision-ready credit pack assessment platform with intake triage, registry reconciliation, screening, financial spreading, four-eyes pricing, and fulfillment.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
