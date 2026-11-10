@@ -15,6 +15,9 @@ import json
 import time
 import hashlib
 
+from tools.credit_tools import ToolDefinition, CreditToolRegistry
+from prompts import get_prompt_contract
+
 class HITLStatus(str, Enum):
     NOT_REACHED = "NOT_REACHED"
     WAITING_FOR_HUMAN = "WAITING_FOR_HUMAN"
@@ -28,13 +31,6 @@ class AgentExecutionState(str, Enum):
     PAUSED_HITL = "PAUSED_HITL"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
-
-@dataclass
-class ToolDefinition:
-    name: str
-    description: str
-    parameters_schema: Dict[str, Any]
-    handler: Optional[str] = None  # Method name or function pointer
 
 @dataclass
 class HITLCheckpoint:
@@ -112,7 +108,6 @@ class GoogleADKAgent:
         self.execution_state = AgentExecutionState.RUNNING
         start_time = time.time()
 
-        # Check for active blocking HITL checkpoints in this agent's domain
         for cp_id in self.hitl_checkpoints:
             cp = session.active_checkpoints.get(cp_id)
             if cp and cp.status == HITLStatus.WAITING_FOR_HUMAN:
@@ -124,7 +119,6 @@ class GoogleADKAgent:
                     "message": f"Execution paused for mandatory human attestation at checkpoint {cp.name} ({cp.fca_rule}).",
                 }
 
-        # Simulated tool call resolution
         tool_results = []
         for t in self.tools:
             if invoked_tools and t.name in invoked_tools:
@@ -167,108 +161,59 @@ class GoogleADKOrchestrator:
         self._initialize_core_adk_agents()
 
     def _initialize_core_adk_agents(self):
-        # 1. Intake & Triage Agent
-        intake_agent = GoogleADKAgent(
+        all_tools = CreditToolRegistry.get_all_tools()
+        tool_map = {t.name: t for t in all_tools}
+
+        intake_contract = get_prompt_contract("intake_triage")
+        fin_contract = get_prompt_contract("financial_analyst")
+        fcc_contract = get_prompt_contract("due_diligence")
+        authoring_contract = get_prompt_contract("credit_authoring")
+        gateway_contract = get_prompt_contract("underwriter_copilot")
+
+        # 1. Intake Agent
+        self.agents["intake"] = GoogleADKAgent(
             name="ADK_IntakeTriageAgent",
             role_description="Origination Intake & Statutory 7 Category Classification",
-            instruction="Classify inbound dealer applications into statutory categories and derive Decision Table DT-1 requirements.",
-            tools=[
-                ToolDefinition(
-                    name="classify_case_category",
-                    description="Maps intake payload to 1 of 7 statutory categories.",
-                    parameters_schema={"type": "object", "properties": {"dealer_type": {"type": "string"}}}
-                ),
-                ToolDefinition(
-                    name="derive_dt1_checklist",
-                    description="Generates mandatory checklist under Decision Table DT-1.",
-                    parameters_schema={"type": "object", "properties": {"category": {"type": "string"}}}
-                )
-            ],
+            instruction=intake_contract["system"] if intake_contract else "Classify intake.",
+            tools=[tool_map["classify_case_category"], tool_map["derive_dt1_checklist"]],
             hitl_checkpoints=["HITL_INTAKE_APPROVAL"]
         )
 
-        # 2. Financial Spreading Agent
-        fin_agent = GoogleADKAgent(
+        # 2. Financial Analyst Agent
+        self.agents["financials"] = GoogleADKAgent(
             name="ADK_FinancialAnalystAgent",
             role_description="Financial Normalization, Ratio Computation & Headroom Analysis",
-            instruction="Execute normalized chart of accounts spreading, evaluate CALC-001..010, and stress test facility headroom.",
-            tools=[
-                ToolDefinition(
-                    name="compute_calcs_deterministic",
-                    description="Calculates Gearing, Current Ratio, DSCR, and Stock Turn.",
-                    parameters_schema={"type": "object", "properties": {"periods": {"type": "array"}}}
-                ),
-                ToolDefinition(
-                    name="validate_cashflow_invariant",
-                    description="Enforces CALC-007 Cashflow Discrepancy == 0.",
-                    parameters_schema={"type": "object", "properties": {"cashflows": {"type": "object"}}}
-                )
-            ],
+            instruction=fin_contract["system"] if fin_contract else "Analyze financials.",
+            tools=[tool_map["compute_calcs_deterministic"], tool_map["validate_cashflow_invariant"]],
             hitl_checkpoints=[]
         )
 
-        # 3. Due Diligence & FCC Agent
-        fcc_agent = GoogleADKAgent(
+        # 3. Due Diligence Agent
+        self.agents["screening"] = GoogleADKAgent(
             name="ADK_DueDiligenceAgent",
             role_description="Financial Crime Compliance, Sanctions Screening & CRA Rating",
-            instruction="Investigate sanctions, PEP, and adverse media hits under FCA SYSC 6.3 and SAMLA 2018.",
-            tools=[
-                ToolDefinition(
-                    name="screen_watchlists_parallel",
-                    description="Executes 5 parallel AML screening checks.",
-                    parameters_schema={"type": "object", "properties": {"target_parties": {"type": "array"}}}
-                ),
-                ToolDefinition(
-                    name="evaluate_dt3_disposition",
-                    description="Evaluates false positive differentiation criteria under Decision Table DT-3.",
-                    parameters_schema={"type": "object", "properties": {"hit_id": {"type": "string"}}}
-                )
-            ],
+            instruction=fcc_contract["system"] if fcc_contract else "Screen AML.",
+            tools=[tool_map["screen_watchlists_parallel"], tool_map["evaluate_dt3_disposition"]],
             hitl_checkpoints=["HITL_FCC_DISPOSITION"]
         )
 
         # 4. Credit Authoring Agent
-        authoring_agent = GoogleADKAgent(
+        self.agents["authoring"] = GoogleADKAgent(
             name="ADK_CreditAuthoringAgent",
             role_description="Commentary Drafting with Cell Lineage & Non-Human Content Watermarking",
-            instruction="Draft commercial commentary with [SRC: ...] cell citations under FCA PR-02 and REQ-046.",
-            tools=[
-                ToolDefinition(
-                    name="inject_cell_provenance",
-                    description="Resolves financial and registry cell references into source citations.",
-                    parameters_schema={"type": "object", "properties": {"section": {"type": "string"}}}
-                )
-            ],
+            instruction=authoring_contract["system"] if authoring_contract else "Draft commentary.",
+            tools=[],
             hitl_checkpoints=["HITL_AM_NARRATIVE_ATTESTATION"]
         )
 
-        # 5. Gateway & Completeness Agent
-        gateway_agent = GoogleADKAgent(
+        # 5. Gateway Submission Agent
+        self.agents["gateway"] = GoogleADKAgent(
             name="ADK_GatewaySubmissionAgent",
             role_description="Deterministic Completeness Gate & Underwriting Handoff",
-            instruction="Enforces Decision Table DT-2 completeness and seals WORM SHA-256 snapshots.",
-            tools=[
-                ToolDefinition(
-                    name="evaluate_dt2_gate",
-                    description="Verifies 100% item satisfaction and 90-day validity invariant.",
-                    parameters_schema={"type": "object", "properties": {"checklist": {"type": "array"}}}
-                ),
-                ToolDefinition(
-                    name="seal_worm_snapshot",
-                    description="Generates immutable SHA-256 cryptographically sealed pack hash.",
-                    parameters_schema={"type": "object", "properties": {"pack_data": {"type": "object"}}}
-                )
-            ],
+            instruction=gateway_contract["system"] if gateway_contract else "Gateway check.",
+            tools=[tool_map["evaluate_dt2_gate"], tool_map["seal_worm_snapshot"]],
             hitl_checkpoints=["HITL_CREDIT_UNDERWRITER_DECISION"]
         )
-
-        self.agents = {
-            "intake": intake_agent,
-            "financials": fin_agent,
-            "screening": fcc_agent,
-            "authoring": authoring_agent,
-            "gateway": gateway_agent,
-        }
 
     def create_session(self, case_id: str, dealer_name: str) -> SessionState:
         session_id = f"adk-sess-{int(time.time())}-{hashlib.md5(case_id.encode()).hexdigest()[:6]}"
@@ -331,12 +276,9 @@ class GoogleADKOrchestrator:
         return [a.to_adk_manifest() for a in self.agents.values()]
 
     def run_full_pipeline(self, session_id: str) -> Dict[str, Any]:
-        """
-        Runs the Google ADK multi-agent pipeline through all agents, respecting HITL gates.
-        """
         session = self.sessions.get(session_id)
         if not session:
-            session = self.create_session("CASE-APX-2024-001", "Apex Motor Group Ltd")
+            session = self.create_session("CASE-APX-2026-0891", "Apex Motor Group Limited")
             session_id = session.session_id
 
         pipeline_results = []
@@ -347,7 +289,6 @@ class GoogleADKOrchestrator:
                 invoked_tools=[t.name for t in agent.tools]
             )
             pipeline_results.append(res)
-            # If hitl paused, we can report state
             if res.get("status") == "PAUSED_HITL":
                 break
 
@@ -369,9 +310,6 @@ class GoogleADKOrchestrator:
         user_id: str,
         amendments: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Resumes a paused Google ADK pipeline upon human-in-the-loop signoff.
-        """
         session = self.sessions.get(session_id)
         if not session or checkpoint_id not in session.active_checkpoints:
             return {"error": "Invalid session or checkpoint ID"}
