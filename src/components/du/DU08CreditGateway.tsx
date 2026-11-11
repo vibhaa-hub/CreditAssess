@@ -30,7 +30,6 @@ export const DU08CreditGateway: React.FC = () => {
   const {
     activeCase,
     checkCompleteness,
-    authorizeSubmissionToCredit,
     recordUnderwritingDecision,
     raiseUnderwriterQuery,
     resolveUnderwriterQuery,
@@ -38,29 +37,26 @@ export const DU08CreditGateway: React.FC = () => {
     setActiveDU,
   } = useCreditAssessment();
 
-  const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [queryInput, setQueryInput] = useState('');
   const [resolutionInput, setResolutionInput] = useState('');
   const [selectedQueryId, setSelectedQueryId] = useState<string | null>(null);
 
   // Underwriter decision state
-  const [decisionOutcome, setDecisionOutcome] = useState<UnderwritingOutcome>('APPROVED_WITH_CONDITIONS');
-  const [decisionRationale, setDecisionRationale] = useState(
-    'Approved subject to execution of First Debenture Deed of Variation and verified BACS direct debit setup.'
-  );
-  const [conditionsText, setConditionsText] = useState(
-    'Execution of Deed of Variation to First Debenture (£6.0M)\nActive BACS Direct Debit Mandate setup\nComprehensive motor trade insurance policy (>£7.5M)'
-  );
+  const [decisionOutcome, setDecisionOutcome] = useState<UnderwritingOutcome | ''>('');
+  const [decisionRationale, setDecisionRationale] = useState('');
+  const [conditionsText, setConditionsText] = useState('');
 
   // Gemini Underwriting Copilot State
   const [copilotQuestion, setCopilotQuestion] = useState('');
   const [copilotResponse, setCopilotResponse] = useState('');
+  const [copilotError, setCopilotError] = useState<string | null>(null);
   const [isCopilotThinking, setIsCopilotThinking] = useState(false);
 
   const handleAskCopilot = async (questionText?: string) => {
     const q = questionText || copilotQuestion;
     if (!q.trim()) return;
     setIsCopilotThinking(true);
+    setCopilotError(null);
     try {
       const res = await fetch('/api/gemini/underwriter-assistant', {
         method: 'POST',
@@ -77,11 +73,14 @@ export const DU08CreditGateway: React.FC = () => {
         }),
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `AI request failed (${res.status}).`);
       if (data.response) {
         setCopilotResponse(data.response);
+      } else {
+        throw new Error('The AI provider returned no response.');
       }
     } catch (err) {
-      console.error('Copilot request failed:', err);
+      setCopilotError(err instanceof Error ? err.message : 'AI request failed.');
     } finally {
       setIsCopilotThinking(false);
     }
@@ -89,14 +88,6 @@ export const DU08CreditGateway: React.FC = () => {
 
   const completeness = checkCompleteness();
   const isSubmissionBlocked = completeness.isBlocked;
-
-  const handleAuthorize = () => {
-    setSubmissionError(null);
-    const res = authorizeSubmissionToCredit();
-    if (!res.success && res.error) {
-      setSubmissionError(res.error);
-    }
-  };
 
   const handleRaiseQuery = (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,6 +104,7 @@ export const DU08CreditGateway: React.FC = () => {
   };
 
   const handleRecordDecision = () => {
+    if (!decisionOutcome || !decisionRationale.trim()) return;
     const condList = conditionsText
       .split('\n')
       .map((c) => c.trim())
@@ -139,7 +131,7 @@ export const DU08CreditGateway: React.FC = () => {
             <span className="text-xs text-slate-400 font-mono">Domain: DOM-03 Credit Assessment</span>
           </div>
           <p className="text-xs text-slate-400">
-            Deterministic Completeness Gate (DT-2 / CALC-011), Account Manager submission authorization (BR-E01), SHA-256 sealed WORM snapshotting (REQ-064), and independent Underwriting Assessment interface (AS-01 / BR-G01).
+            Application completeness checks and role-gated workflow screens. Credit submission is unavailable until a credit-gateway integration is implemented.
           </p>
         </div>
 
@@ -199,17 +191,6 @@ export const DU08CreditGateway: React.FC = () => {
         ]}
       />
 
-      {/* Submission Error Banner */}
-      {submissionError && (
-        <div className="p-4 bg-red-950/60 border border-red-800 rounded-xl flex items-center gap-3 text-red-200 text-xs">
-          <AlertTriangle className="w-5 h-5 text-red-400 shrink-0" />
-          <div>
-            <span className="font-bold block text-sm text-red-100">Submission Authorization Blocked</span>
-            <p className="text-red-300 text-[11px] mt-0.5">{submissionError}</p>
-          </div>
-        </div>
-      )}
-
       {/* Grid: 2 columns */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left: Deterministic Completeness Gate & Authorization (REQ-061, CALC-011, DT-2, BR-P04, REQ-062, BR-E01) */}
@@ -257,7 +238,7 @@ export const DU08CreditGateway: React.FC = () => {
               <div className="p-3 bg-emerald-950/30 border border-emerald-900/60 rounded-lg text-xs space-y-1 text-emerald-300">
                 <div className="flex items-center gap-1.5 font-bold">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  <span>100% Deterministic Gate Passed (DT-2 Satisfied)</span>
+                  <span>Application completeness checks passed</span>
                 </div>
                 <p className="text-slate-300 text-[11px]">
                   All mandatory checklist items, verified UBO ownership tree, cleared screening adjudications, attested narrative commentary, and four-eyes pricing signoffs confirmed.
@@ -272,18 +253,20 @@ export const DU08CreditGateway: React.FC = () => {
                 <p className="text-slate-400 text-[11px]">
                   Only accountable Case Owner ({activeCase.assignedOwner} - {activeCase.ownerRole}) can authorize transmission to Credit.
                 </p>
+                <p className="text-amber-300 text-[11px]">
+                  No credit-gateway integration is configured; this application cannot transmit a submission.
+                </p>
                 <div className="text-[10px] font-mono text-cyan-300">
                   Current User Role: {currentUserRole}
                 </div>
               </div>
 
               <button
-                onClick={handleAuthorize}
-                disabled={isSubmissionBlocked}
-                className="w-full py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md"
+                disabled
+                className="w-full py-2.5 bg-slate-800 text-slate-500 font-bold text-xs rounded-lg flex items-center justify-center gap-2 cursor-not-allowed"
               >
                 <Send className="w-4 h-4" />
-                <span>Digitally Authorize & Transmit Pack to Credit (REQ-062)</span>
+                <span>Credit submission integration unavailable</span>
               </button>
             </div>
           </div>
@@ -292,9 +275,9 @@ export const DU08CreditGateway: React.FC = () => {
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <span className="text-xs font-bold text-white uppercase tracking-wider">
-                Immutable Sealed Snapshots ({activeCase.submissionSnapshots.length})
+                Persisted Submission Snapshots ({activeCase.submissionSnapshots.length})
               </span>
-              <span className="text-[10px] font-mono text-cyan-400">WORM Architecture</span>
+              <span className="text-[10px] font-mono text-cyan-400">Not WORM storage</span>
             </div>
 
             {activeCase.submissionSnapshots.map((snap) => (
@@ -342,7 +325,7 @@ export const DU08CreditGateway: React.FC = () => {
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   <Sparkles className="w-4 h-4 text-indigo-400" />
-                  <span className="text-xs font-bold text-indigo-200">Gemini 3.8 Flash Underwriting Copilot</span>
+                  <span className="text-xs font-bold text-indigo-200">AI Underwriting Assistant (advisory)</span>
                 </div>
                 <span className="text-[10px] font-mono bg-indigo-900/40 text-indigo-300 px-2 py-0.5 rounded border border-indigo-700/50">
                   Advisory Mode (BR-G01)
@@ -398,7 +381,7 @@ export const DU08CreditGateway: React.FC = () => {
               {copilotResponse && (
                 <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 space-y-1.5 font-mono">
                   <div className="flex items-center justify-between text-[10px] text-indigo-400 font-bold uppercase">
-                    <span>Copilot Policy Analysis</span>
+                    <span>AI response — verify independently</span>
                     <button
                       onClick={() => setCopilotResponse('')}
                       className="text-slate-500 hover:text-slate-300"
@@ -410,6 +393,11 @@ export const DU08CreditGateway: React.FC = () => {
                     {copilotResponse}
                   </p>
                 </div>
+              )}
+              {copilotError && (
+                <p className="rounded-lg border border-red-800 bg-red-950/40 p-3 text-xs text-red-200">
+                  {copilotError}
+                </p>
               )}
             </div>
 
@@ -537,9 +525,10 @@ export const DU08CreditGateway: React.FC = () => {
                     <label className="text-slate-400 block mb-1">Underwriting Decision Outcome</label>
                     <select
                       value={decisionOutcome}
-                      onChange={(e) => setDecisionOutcome(e.target.value as any)}
+                      onChange={(e) => setDecisionOutcome(e.target.value as UnderwritingOutcome | '')}
                       className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white font-bold"
                     >
+                      <option value="">Select an outcome</option>
                       <option value="APPROVED_WITH_CONDITIONS">Approved with Conditions</option>
                       <option value="APPROVED">Approved (Unconditional)</option>
                       <option value="DECLINED">Declined</option>
@@ -568,7 +557,12 @@ export const DU08CreditGateway: React.FC = () => {
 
                   <button
                     onClick={handleRecordDecision}
-                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md"
+                    disabled={
+                      !decisionOutcome ||
+                      !decisionRationale.trim() ||
+                      (decisionOutcome === 'APPROVED_WITH_CONDITIONS' && !conditionsText.trim())
+                    }
+                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md"
                   >
                     <CheckCircle2 className="w-4 h-4" />
                     <span>Record Binding Decision & Pass Gate IBVC-01-G4</span>

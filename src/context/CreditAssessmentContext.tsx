@@ -6,7 +6,7 @@
  * Central state orchestration across all 12 AST Deployable Units
  */
 
-import React, { createContext, useContext, useState, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   CreditCase,
   UserRole,
@@ -22,14 +22,20 @@ import {
   NarrativeSection,
   FacilityRequest,
 } from '../types/ast';
-import { initialMockCases } from '../data/mockDealers';
-import { generateSHA256Hash, calculateEffortTelemetry } from '../utils/calculations';
+import { emptyCase } from '../data/emptyCase';
+import { calculateEffortTelemetry } from '../utils/calculations';
 import { evaluateCompletenessGate, getRequirementsForCaseType } from '../data/decisionTables';
 
 interface CreditAssessmentContextType {
   cases: CreditCase[];
+  casesLoading: boolean;
+  casesError: string | null;
+  caseSaveError: string | null;
+  refreshCases: () => Promise<void>;
+  importCase: (caseData: unknown) => Promise<void>;
   activeCaseId: string;
   activeCase: CreditCase;
+  authorizedRoles: UserRole[];
   currentUserRole: UserRole;
   setCurrentUserRole: (role: UserRole) => void;
   activeDU: number; // 1 to 12
@@ -81,137 +87,253 @@ interface CreditAssessmentContextType {
 const CreditAssessmentContext = createContext<CreditAssessmentContextType | undefined>(undefined);
 
 export const CreditAssessmentProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [cases, setCases] = useState<CreditCase[]>(initialMockCases);
-  const [activeCaseId, setActiveCaseId] = useState<string>('CASE-2026-0891');
-  const [currentUserRole, setCurrentUserRole] = useState<UserRole>('WHOLESALE_MANAGER');
+  const [cases, setCases] = useState<CreditCase[]>([]);
+  const [casesLoading, setCasesLoading] = useState(true);
+  const [casesError, setCasesError] = useState<string | null>(null);
+  const [caseSaveError, setCaseSaveError] = useState<string | null>(null);
+  const [activeCaseId, setActiveCaseId] = useState<string>('');
+  const [currentUserRole, setCurrentUserRole] = useState<UserRole>('GOVERNANCE_AUDITOR');
+  const [authorizedRoles, setAuthorizedRoles] = useState<UserRole[]>([]);
   const [activeDU, setActiveDU] = useState<number>(8); // Default to Gateway / authoring overview
 
-  const [exceptionsRegister, setExceptionsRegister] = useState<ExceptionOverrideRecord[]>([
-    {
-      id: 'EXC-001',
-      timestamp: '2026-10-21 15:00:00',
-      caseId: 'CASE-2026-0891',
-      exceptionType: 'POLICY_OVERRIDE_RECENCY_TOLERANCE',
-      reason: 'Approved 14-day grace extension for receipt of updated landlord insurance certificate.',
-      approverId: 'Julian Montgomery (Commercial Director)',
-      approverRole: 'COMMERCIAL_DIRECTOR',
-    },
-  ]);
-
-  const [auditLedger, setAuditLedger] = useState<AuditRecord[]>([
-    {
-      id: 'AUD-001',
-      timestamp: '2026-10-14 09:30:14',
-      actorId: 'SYSTEM_INTAKE_AGENT',
-      actorRole: 'ACCOUNT_MANAGER',
-      deployableUnit: 'DU-01 RequestIntakeAndTriageUnit',
-      action: 'RegisterCreditRequest',
-      details: 'Registered case CASE-2026-0891 from OEM Partner Stellantis referral.',
-      hash: 'sha256_01a4e892c90df1b',
-      previousHash: '00000000000000000000000000000000',
-    },
-    {
-      id: 'AUD-002',
-      timestamp: '2026-10-21 16:40:00',
-      actorId: 'Hannah Croft',
-      actorRole: 'ONBOARDING_ANALYST',
-      deployableUnit: 'DU-03 EntityOwnershipVerificationUnit',
-      action: 'AttestVerificationEvidence',
-      details: 'Formally attested Companies House registry reconciliation and 100% UBO validation.',
-      hash: 'sha256_88b1f492a01ce94',
-      previousHash: 'sha256_01a4e892c90df1b',
-    },
-    {
-      id: 'AUD-003',
-      timestamp: '2026-10-23 14:30:00',
-      actorId: 'Julian Montgomery',
-      actorRole: 'COMMERCIAL_DIRECTOR',
-      deployableUnit: 'DU-07 LendingRequestPricingUnit',
-      action: 'AuthorisePricingAndTermsDualSignoff',
-      details: 'Four-eyes independent authorization of 2.65% SONIA margin & covenants.',
-      hash: 'sha256_31c9e882a19bf02',
-      previousHash: 'sha256_88b1f492a01ce94',
-    },
-  ]);
+  const [exceptionsRegister, setExceptionsRegister] = useState<ExceptionOverrideRecord[]>([]);
+  const [auditLedger, setAuditLedger] = useState<AuditRecord[]>([]);
+  const caseVersions = useRef(new Map<string, number>());
+  const casesRef = useRef(cases);
+  const writeQueues = useRef(new Map<string, Promise<void>>());
+  casesRef.current = cases;
 
   const activeCase = useMemo(() => {
-    return cases.find((c) => c.caseId === activeCaseId) || cases[0];
+    return cases.find((c) => c.caseId === activeCaseId) || cases[0] || emptyCase;
   }, [cases, activeCaseId]);
+
+  const refreshCases = useCallback(async () => {
+    setCasesLoading(true);
+    setCasesError(null);
+    try {
+      const response = await fetch('/api/cases');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `Case loading failed (${response.status}).`);
+      const records = data.cases as { caseData: CreditCase; version: number }[];
+      const loadedCases = records.map((record) => record.caseData);
+      caseVersions.current = new Map(records.map((record) => [record.caseData.caseId, record.version]));
+      casesRef.current = loadedCases;
+      setCases(loadedCases);
+      setActiveCaseId((current) =>
+        loadedCases.some((creditCase) => creditCase.caseId === current)
+          ? current
+          : loadedCases[0]?.caseId ?? ''
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not load cases.';
+      setCasesError(message);
+      throw error;
+    } finally {
+      setCasesLoading(false);
+    }
+  }, []);
+
+  const loadAudit = useCallback(async (caseId: string) => {
+    const response = await fetch(`/api/cases/${encodeURIComponent(caseId)}/audit`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `Audit loading failed (${response.status}).`);
+    setAuditLedger(
+      data.events.map((event: {
+        id: string;
+        createdAt: string;
+        actorId: string;
+        action: string;
+        details: string;
+        eventHash: string;
+        previousHash: string;
+      }) => ({
+        id: event.id,
+        timestamp: event.createdAt,
+        actorId: event.actorId,
+        action: event.action,
+        details: event.details,
+        hash: event.eventHash,
+        previousHash: event.previousHash,
+      }))
+    );
+  }, []);
+
+  const importCase = useCallback(async (caseData: unknown) => {
+    setCaseSaveError(null);
+    const response = await fetch('/api/cases', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caseData }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || `Import failed (${response.status}).`);
+    const savedCase = result as { caseData: CreditCase; version: number };
+    caseVersions.current.set(savedCase.caseData.caseId, savedCase.version);
+    const updatedCases = [
+      savedCase.caseData,
+      ...casesRef.current.filter((item) => item.caseId !== savedCase.caseData.caseId),
+    ];
+    casesRef.current = updatedCases;
+    setCases(updatedCases);
+    setActiveCaseId(savedCase.caseData.caseId);
+    await loadAudit(savedCase.caseData.caseId);
+  }, [loadAudit]);
+
+  useEffect(() => {
+    refreshCases().catch(() => {});
+  }, [refreshCases]);
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Could not load identity roles.');
+        const validRoles: UserRole[] = [
+          'ACCOUNT_MANAGER',
+          'WHOLESALE_MANAGER',
+          'ONBOARDING_ANALYST',
+          'FCC_ANALYST',
+          'COMMERCIAL_DIRECTOR',
+          'CREDIT_UNDERWRITER',
+          'OPERATIONS_ANALYST',
+          'GOVERNANCE_AUDITOR',
+        ];
+        const roles = (data.roles as string[]).filter((role): role is UserRole => validRoles.includes(role as UserRole));
+        setAuthorizedRoles(roles);
+        if (roles.length > 0) setCurrentUserRole(roles[0]);
+      })
+      .catch((error) => {
+        setCaseSaveError(error instanceof Error ? error.message : 'Could not load identity roles.');
+      });
+  }, []);
+
+  useEffect(() => {
+    if (activeCaseId) {
+      loadAudit(activeCaseId).catch((error) => {
+        setCaseSaveError(error instanceof Error ? error.message : 'Could not load audit events.');
+      });
+    } else {
+      setAuditLedger([]);
+    }
+  }, [activeCaseId, loadAudit]);
 
   const appendAudit = useCallback(
     (action: string, du: string, details: string) => {
-      const lastHash = auditLedger.length > 0 ? auditLedger[auditLedger.length - 1].hash : '0000000000000000';
-      const newHash = generateSHA256Hash(`${action}-${details}-${Date.now()}`);
-      const newRecord: AuditRecord = {
-        id: `AUD-${Date.now().toString().slice(-5)}`,
-        timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
-        actorId: `User (${currentUserRole})`,
-        actorRole: currentUserRole,
-        deployableUnit: du,
-        action,
-        details,
-        hash: newHash,
-        previousHash: lastHash,
-      };
-      setAuditLedger((prev) => [...prev, newRecord]);
+      if (!activeCaseId) return;
+      const caseId = activeCaseId;
+      const previous = writeQueues.current.get(caseId) ?? Promise.resolve();
+      const queuedWrite = previous.then(async () => {
+        const response = await fetch(`/api/cases/${encodeURIComponent(caseId)}/audit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action, details: `${du}: ${details}` }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `Audit write failed (${response.status}).`);
+        await loadAudit(caseId);
+      });
+      writeQueues.current.set(
+        caseId,
+        queuedWrite.catch((error) => {
+          setCaseSaveError(error instanceof Error ? error.message : 'Could not write audit event.');
+        })
+      );
     },
-    [auditLedger, currentUserRole]
+    [activeCaseId, loadAudit]
   );
 
   const updateActiveCase = useCallback(
     (updater: (c: CreditCase) => CreditCase) => {
-      setCases((prev) =>
-        prev.map((c) => (c.caseId === activeCaseId ? updater(c) : c))
+      const current = casesRef.current.find((creditCase) => creditCase.caseId === activeCaseId);
+      if (!current) return;
+      const updatedCase = updater(current);
+      const updatedCases = casesRef.current.map((creditCase) =>
+        creditCase.caseId === activeCaseId ? updatedCase : creditCase
+      );
+      casesRef.current = updatedCases;
+      setCases(updatedCases);
+      setCaseSaveError(null);
+
+      const caseId = activeCaseId;
+      const previous = writeQueues.current.get(caseId) ?? Promise.resolve();
+      const queuedWrite = previous.then(async () => {
+        const expectedVersion = caseVersions.current.get(caseId);
+        if (expectedVersion === undefined) throw new Error('Case version is missing; reload before editing.');
+        const response = await fetch(`/api/cases/${encodeURIComponent(caseId)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ caseData: updatedCase, expectedVersion }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `Case save failed (${response.status}).`);
+        caseVersions.current.set(caseId, result.version);
+      });
+      writeQueues.current.set(
+        caseId,
+        queuedWrite.catch(async (error) => {
+          setCaseSaveError(error instanceof Error ? error.message : 'Could not save this case.');
+          try {
+            const response = await fetch(`/api/cases/${encodeURIComponent(caseId)}`);
+            const result = await response.json();
+            if (response.ok) {
+              caseVersions.current.set(caseId, result.version);
+              const refreshedCases = casesRef.current.map((creditCase) =>
+                creditCase.caseId === caseId ? result.caseData as CreditCase : creditCase
+              );
+              casesRef.current = refreshedCases;
+              setCases(refreshedCases);
+              await loadAudit(caseId);
+            }
+          } catch (refreshError) {
+            setCaseSaveError(
+              refreshError instanceof Error
+                ? `Save failed and reload failed: ${refreshError.message}`
+                : 'Save failed and the current data could not be reloaded.'
+            );
+          }
+        })
       );
     },
-    [activeCaseId]
+    [activeCaseId, loadAudit]
   );
 
   // Telemetry computation (CALC-013, REQ-093 to REQ-097)
   const telemetry = useMemo(() => {
-    const stageEffort = [
-      { stage: 'DU-01 Intake & Triage', minutes: 3.5 },
-      { stage: 'DU-02 Info Gathering & Ingestion', minutes: 6.2 },
-      { stage: 'DU-03 Registry & Ownership Reconciliation', minutes: 4.8 },
-      { stage: 'DU-04 Financial Crime & Screening', minutes: 5.1 },
-      { stage: 'DU-05 Financial Spreading & Ratios', minutes: 8.4 },
-      { stage: 'DU-06 Pack Authoring & Narrative Review', minutes: 7.2 },
-      { stage: 'DU-07 Four-Eyes Pricing & Structuring', minutes: 3.0 },
-      { stage: 'DU-08 Completeness Gate & Transmission', minutes: 2.5 },
-      { stage: 'DU-09 Downstream Post-Approval Fulfillment', minutes: 5.0 },
-    ];
-
+    const stageEffort: { stage: string; minutes: number }[] = [];
     const effort = calculateEffortTelemetry(stageEffort);
-
-    const volumeByLine: Record<LendingLine, number> = {
-      WHOLESALE: 18,
-      FRANCHISE: 12,
-      FLEET: 8,
-      RETAIL: 4,
-    };
-
+    const volumeByLine: Record<LendingLine, number> = { WHOLESALE: 0, FRANCHISE: 0, FLEET: 0, RETAIL: 0 };
     const volumeBySource: Record<string, number> = {
-      OEM_PARTNER: 22,
-      FIELD_TEAM: 9,
-      DEALER_DIRECT: 6,
-      BANK_REFERRAL: 3,
-      EXISTING_RELATIONSHIP: 12,
+      OEM_PARTNER: 0,
+      FIELD_TEAM: 0,
+      DEALER_DIRECT: 0,
+      BANK_REFERRAL: 0,
+      EXISTING_RELATIONSHIP: 0,
     };
+    for (const creditCase of cases) {
+      for (const line of creditCase.classification.affectedLendingLines) volumeByLine[line] += 1;
+      volumeBySource[creditCase.originationSource] += 1;
+    }
 
     return {
+      isMeasured: false,
       totalEffortMinutes: effort.totalEffortMinutes,
       baselineBenchmarkMinutes: effort.baselineBenchmarkMinutes,
       effortVarianceMinutes: effort.varianceMinutes,
       effortSavingsPct: effort.savingsPct,
       stageEffort,
+      totalCaseCount: cases.length,
+      overdueReviewCount: cases.filter((creditCase) => creditCase.periodicReview.isOverdue).length,
       caseVolumeByLine: volumeByLine,
-      caseVolumeBySource: volumeBySource as any,
-      reworkCount: 1,
+      caseVolumeBySource: volumeBySource as TelemetryMetrics['caseVolumeBySource'],
+      reworkCount: cases.reduce(
+        (total, creditCase) => total + creditCase.underwriterQueries.filter((query) => query.status === 'RESOLVED').length,
+        0
+      ),
       queryCount: activeCase.underwriterQueries.length,
       exceptionCount: exceptionsRegister.length,
-      manualInterventionsCount: 2,
+      manualInterventionsCount: auditLedger.length,
     };
-  }, [activeCase, exceptionsRegister]);
+  }, [cases, activeCase, exceptionsRegister, auditLedger]);
 
   // DU-01 Actions
   const updateCaseClassification = useCallback(
@@ -560,36 +682,11 @@ export const CreditAssessmentProvider: React.FC<{ children: React.ReactNode }> =
       };
     }
 
-    const nextVer = `v1.${activeCase.submissionSnapshots.length}`;
-    const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
-    const sha = generateSHA256Hash(`${activeCase.caseId}-${nextVer}-${timestamp}`);
-    const queueTx = `TX-CR-${Date.now().toString().slice(-6)}`;
-
-    const newSnapshot = {
-      snapshotId: `SNAP-${activeCase.caseId}-${nextVer}`,
-      packVersion: nextVer,
-      submittedAt: timestamp,
-      submittedBy: activeCase.assignedOwner,
-      sha256Seal: sha,
-      creditQueueTxId: queueTx,
-      status: 'QUEUED_IN_CREDIT' as const,
+    return {
+      success: false,
+      error: 'Credit submission is disabled: no real credit-gateway integration is configured.',
     };
-
-    updateActiveCase((prev) => ({
-      ...prev,
-      status: 'UNDERWRITING_REVIEW',
-      currentStageNumber: 8,
-      submissionSnapshots: [newSnapshot, ...prev.submissionSnapshots],
-    }));
-
-    appendAudit(
-      'GenerateImmutableSnapshotAndTransmit',
-      'DU-08 CreditSubmissionGatewayUnit',
-      `Authorized and sealed decision-ready credit pack snapshot ${nextVer} with SHA-256 seal ${sha}. Transmitted to Underwriting queue ${queueTx} (REQ-063, REQ-064, BR-P05)`
-    );
-
-    return { success: true };
-  }, [currentUserRole, checkCompleteness, activeCase, updateActiveCase, appendAudit]);
+  }, [currentUserRole, checkCompleteness]);
 
   const recordUnderwritingDecision = useCallback(
     (outcome: UnderwritingOutcome, rationale: string, conditions?: string[]) => {
@@ -722,17 +819,8 @@ export const CreditAssessmentProvider: React.FC<{ children: React.ReactNode }> =
   );
 
   const enableOperationalFunding = useCallback(() => {
-    updateActiveCase((prev) => ({
-      ...prev,
-      status: 'ACTIVE_FUNDING',
-      currentStageNumber: 9,
-    }));
-    appendAudit(
-      'FinaliseCaseClosureAndNotifyMilestones',
-      'DU-09 PostApprovalFulfillmentUnit',
-      `All handoffs and Conditions Precedent satisfied. Operational wholesale vehicle drawdowns ENABLED. Gate GATE-09 passed.`
-    );
-  }, [updateActiveCase, appendAudit]);
+    setCaseSaveError('Funding activation is disabled until a real servicing integration is implemented.');
+  }, []);
 
   // DU-10 Actions
   const triggerLifecycleEvent = useCallback(
@@ -780,32 +868,24 @@ export const CreditAssessmentProvider: React.FC<{ children: React.ReactNode }> =
 
   // DU-12 Actions
   const recordExceptionOverride = useCallback(
-    (exceptionType: string, reason: string) => {
-      const newRec: ExceptionOverrideRecord = {
-        id: `EXC-${Date.now().toString().slice(-4)}`,
-        timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
-        caseId: activeCase.caseId,
-        exceptionType,
-        reason,
-        approverId: `${activeCase.assignedOwner} (${currentUserRole})`,
-        approverRole: currentUserRole,
-      };
-      setExceptionsRegister((prev) => [newRec, ...prev]);
-      appendAudit(
-        'LogExceptionsAndOverridesWithApprovedJustification',
-        'DU-12 GovernanceAuditTelemetryUnit',
-        `Recorded policy exception ${exceptionType}: ${reason} (REQ-091 / BR-E04)`
-      );
+    (_exceptionType: string, _reason: string) => {
+      setCaseSaveError('Exception overrides are disabled until they can be stored and independently authorized on the server.');
     },
-    [activeCase.caseId, activeCase.assignedOwner, currentUserRole, appendAudit]
+    []
   );
 
   return (
     <CreditAssessmentContext.Provider
       value={{
         cases,
+        casesLoading,
+        casesError,
+        caseSaveError,
+        refreshCases,
+        importCase,
         activeCaseId,
         activeCase,
+        authorizedRoles,
         currentUserRole,
         setCurrentUserRole,
         activeDU,

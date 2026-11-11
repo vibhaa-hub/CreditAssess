@@ -215,7 +215,9 @@ export function calculateEffortTelemetry(
   const total = Number(stageMinutes.reduce((sum, s) => sum + s.minutes, 0).toFixed(1));
   const baseline = 90.0;
   const variance = Number((total - baseline).toFixed(1));
-  const savingsPct = total < baseline ? Number((((baseline - total) / baseline) * 100).toFixed(1)) : 0;
+  const savingsPct = stageMinutes.length > 0 && total < baseline
+    ? Number((((baseline - total) / baseline) * 100).toFixed(1))
+    : 0;
   return {
     totalEffortMinutes: total,
     baselineBenchmarkMinutes: baseline,

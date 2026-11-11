@@ -47,9 +47,9 @@ export interface AuditRecord {
   id: string;
   timestamp: string;
   actorId: string;
-  actorRole: UserRole;
+  actorRole?: UserRole;
   action: string;
-  deployableUnit: string;
+  deployableUnit?: string;
   details: string;
   hash: string;
   previousHash: string;
@@ -360,11 +360,14 @@ export interface ExceptionOverrideRecord {
 }
 
 export interface TelemetryMetrics {
+  isMeasured: boolean;
   totalEffortMinutes: number; // CALC-013 sum of stage minutes
   baselineBenchmarkMinutes: number; // 90.0
   effortVarianceMinutes: number; // total - baseline
   effortSavingsPct: number;
   stageEffort: { stage: string; minutes: number }[];
+  totalCaseCount: number;
+  overdueReviewCount: number;
   caseVolumeByLine: Record<LendingLine, number>;
   caseVolumeBySource: Record<OriginationSource, number>;
   reworkCount: number;

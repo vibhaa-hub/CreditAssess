@@ -2,8 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * ApexCredit Python Multi-Agent Control Center
- * Google ADK Multi-Agent Orchestrator, Rule Engine DSL, Docling/OCR Ingestion, and RAG Knowledge Base
+ * Experimental local agent and rule-tool console.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -41,12 +40,9 @@ export const PythonAgentConsole: React.FC = () => {
 
   const [isRunning, setIsRunning] = useState(false);
   const [terminalLogs, setTerminalLogs] = useState<string[]>([
-    '[SYSTEM] Google Agent Development Kit (ADK) Environment Active.',
-    '[ORCHESTRATOR] 5 Google ADK Agents Registered: Intake, FinancialAnalyst, DueDiligence, CreditAuthoring, GatewaySubmission.',
-    '[HITL] 4 Human-in-the-Loop checkpoints initialized (IBVC-01-G1, IBVC-01-G2, IBVC-01-G3, IBVC-01-G4).',
-    '[RULE_ENGINE] Declarative DSL ready with 8 statutory invariants (CALC-001..014, DT-1..5).',
-    '[DOCLING] Docling v2.1 table-structure recovery & OCR pipeline mounted.',
-    '[RAG] Vector / Keyword semantic store indexed with FCA Handbook, JMLSG, and Credit Policies.',
+    '[EXPERIMENTAL] Local agent and rule-tool endpoints are available.',
+    '[WARNING] These tools are not connected to production screening, credit, or document providers.',
+    '[WARNING] Sample status messages do not prove external checks or human approvals occurred.',
   ]);
 
   // Google ADK State
@@ -172,7 +168,7 @@ export const PythonAgentConsole: React.FC = () => {
       setTerminalLogs((prev) => [
         ...prev,
         `[RULE_ENGINE_DSL] Invariant evaluation complete: ${data.status}. (${data.passed_rules}/${data.total_rules} rules passed).`,
-        `[WORM_AUDIT_SEAL] SHA-256 Seal: ${data.sha256_audit_seal}`,
+        `[LOCAL_RULE_DIGEST] SHA-256: ${data.sha256_audit_seal}`,
       ]);
     } catch (err) {
       console.error(err);
@@ -240,16 +236,20 @@ export const PythonAgentConsole: React.FC = () => {
           <div>
             <div className="flex items-center space-x-2">
               <h2 className="text-lg font-bold text-white tracking-wide">
-                Google ADK Multi-Agent Orchestration & Deterministic Engine
+                Experimental Agent & Rule Tools
               </h2>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-semibold">
-                HITL Gated
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-semibold">
+                Not production validated
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Enterprise ADK agents, Human-in-the-Loop review gates, declarative Rule Engine DSL, Docling document parser, and FCA RAG knowledge base.
+              Local agent-workflow examples, rule tools, document parsing, and retrieval experiments.
             </p>
           </div>
+        </div>
+
+        <div className="rounded-lg border border-amber-800 bg-amber-950/30 p-3 text-xs text-amber-200">
+          These local agent, OCR, RAG, and rule-engine tools are experimental. Their outputs do not establish external provider checks, verified evidence, or regulatory approval.
         </div>
 
         {/* Navigation Tabs */}
@@ -483,7 +483,7 @@ export const PythonAgentConsole: React.FC = () => {
                   </span>
                 </div>
                 <span className="font-mono text-[10px] text-purple-300">
-                  WORM SHA-256: {ruleEvalResult.sha256_audit_seal.substring(0, 16)}...
+                  Local SHA-256 digest (not WORM): {ruleEvalResult.sha256_audit_seal.substring(0, 16)}...
                 </span>
               </div>
 

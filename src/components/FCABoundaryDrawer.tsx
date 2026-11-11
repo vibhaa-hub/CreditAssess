@@ -2,8 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * FCA Compliance & Determinism Boundary Component
- * Progressive disclosure explaining strict separation between LLM assistance and deterministic statutory gates.
+ * Governance and AI control information shown alongside workflow screens.
  */
 
 import React, { useState } from 'react';
@@ -62,24 +61,24 @@ export const FCABoundaryDrawer: React.FC<FCABoundaryDrawerProps> = ({
           <div>
             <div className="flex items-center space-x-2">
               <span className="text-sm font-semibold text-white tracking-wide">
-                FCA Regulatory Determinism & AI Boundary
+                Governance & AI Control Information
               </span>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono font-medium">
-                BR-G01 ENFORCED
+              <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono font-medium">
+                Implementation varies
               </span>
               <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 font-mono">
                 {currentDU}
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Strict progressive disclosure: AI generates assistive drafts; statutory gates & calculations are 100% deterministic code.
+              Informational design notes only — not evidence of regulatory compliance or production control effectiveness.
             </p>
           </div>
         </div>
 
         <div className="flex items-center space-x-3">
           <span className="text-xs text-indigo-300 font-mono font-medium">
-            {isOpen ? 'Collapse Governance Audit' : 'Inspect Governance Matrix'}
+            {isOpen ? 'Collapse Control Notes' : 'Inspect Control Notes'}
           </span>
           {isOpen ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
         </div>
@@ -94,10 +93,10 @@ export const FCABoundaryDrawer: React.FC<FCABoundaryDrawerProps> = ({
             <div className="p-4 rounded-xl bg-slate-900/90 border border-emerald-500/30">
               <div className="flex items-center space-x-2 text-emerald-400 font-semibold mb-3">
                 <Lock className="w-4 h-4" />
-                <span className="text-xs uppercase tracking-wider">Deterministic Code Domain (Zero Hallucination)</span>
+                <span className="text-xs uppercase tracking-wider">Configured Rule Checks</span>
               </div>
               <p className="text-xs text-slate-300 mb-3 leading-relaxed">
-                Governed by immutable TypeScript and Python algorithms under FCA Senior Managers & Certification Regime (SM&CR):
+                Rule checks use application code and supplied case data. They are not independently validated or certified by this screen.
               </p>
               <div className="space-y-2">
                 {deterministicRules.map((r, i) => (
@@ -110,31 +109,31 @@ export const FCABoundaryDrawer: React.FC<FCABoundaryDrawerProps> = ({
                       <p className="text-xs text-slate-300 font-medium mt-0.5">{r.name}</p>
                       <p className="text-[11px] text-slate-400 mt-0.5">{r.description}</p>
                     </div>
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono whitespace-nowrap">
-                      {r.status}
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-mono whitespace-nowrap">
+                      Declared: {r.status}
                     </span>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Column 2: Assistive GenAI Domain */}
+            {/* Column 2: AI assistance */}
             <div className="p-4 rounded-xl bg-slate-900/90 border border-indigo-500/30">
               <div className="flex items-center space-x-2 text-indigo-400 font-semibold mb-3">
                 <Cpu className="w-4 h-4" />
                 <span className="text-xs uppercase tracking-wider">
-                  GenAI Assistive Domain ({aiAssistanceScope.currentModel})
+                  Configured AI Assistance ({aiAssistanceScope.currentModel})
                 </span>
               </div>
               <p className="text-xs text-slate-300 mb-3 leading-relaxed">
-                Operates strictly under prompt grounding with cell citations [SRC: ...]. Outputs are provisional until signed by certified personnel:
+                These are intended-use descriptions, not technical enforcement. Verify source data and AI output independently.
               </p>
 
               <div className="space-y-3">
                 <div>
                   <div className="text-[11px] font-semibold text-indigo-300 uppercase tracking-wide mb-1 flex items-center space-x-1">
                     <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                    <span>Authorized AI Assistive Functions</span>
+                    <span>Intended AI Tasks</span>
                   </div>
                   <ul className="text-xs text-slate-300 space-y-1 list-disc pl-5">
                     {aiAssistanceScope.allowedTasks.map((t, i) => (
@@ -146,7 +145,7 @@ export const FCABoundaryDrawer: React.FC<FCABoundaryDrawerProps> = ({
                 <div className="pt-2 border-t border-slate-800">
                   <div className="text-[11px] font-semibold text-rose-300 uppercase tracking-wide mb-1 flex items-center space-x-1">
                     <AlertCircle className="w-3 h-3 text-rose-400" />
-                    <span>Prohibited AI Autonomous Actions</span>
+                    <span>Actions Not Intended For AI</span>
                   </div>
                   <ul className="text-xs text-slate-400 space-y-1 list-disc pl-5">
                     {aiAssistanceScope.prohibitedTasks.map((t, i) => (
@@ -158,16 +157,16 @@ export const FCABoundaryDrawer: React.FC<FCABoundaryDrawerProps> = ({
             </div>
           </div>
 
-          {/* Statutory regulatory footer */}
+          {/* Compliance and readiness disclaimer */}
           <div className="p-3 rounded-lg bg-indigo-950/40 border border-indigo-800/40 flex items-center justify-between text-xs">
             <div className="flex items-center space-x-2 text-slate-300">
               <ShieldCheck className="w-4 h-4 text-indigo-400 flex-shrink-0" />
               <span>
-                <strong>FCA Compliance Guarantee:</strong> Audit trails are appended to SHA-256 WORM ledger. No credit agreement is binding without 4-eyes human underwriter counter-execution (BR-E02).
+                <strong>Not a compliance guarantee:</strong> This application is not certified for regulated decisions. Audit events are hash-chained in PostgreSQL, not WORM storage; funding and external provider workflows are not connected.
               </span>
             </div>
             <span className="font-mono text-[11px] text-indigo-300 bg-slate-900 px-2.5 py-1 rounded border border-indigo-500/30 whitespace-nowrap">
-              SYSC 15A & CONC 5.2A
+              Production readiness: incomplete
             </span>
           </div>
         </div>

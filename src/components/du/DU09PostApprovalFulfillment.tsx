@@ -61,7 +61,7 @@ export const DU09PostApprovalFulfillment: React.FC = () => {
             <span className="text-xs text-slate-400 font-mono">Domain: DOM-05 Operations & Funding</span>
           </div>
           <p className="text-xs text-slate-400">
-            Multi-track downstream operational orchestration (REQ-068), parameter integrity enforcement (REQ-070 / BR-P07), and Conditions Precedent tracking prior to live vehicle funding activation (BR-P08 / Gate GATE-09).
+            Manually recorded handoff and evidence-reference tracking. No downstream operations, document-verification, or servicing integration is connected.
           </p>
         </div>
 
@@ -86,7 +86,7 @@ export const DU09PostApprovalFulfillment: React.FC = () => {
             </div>
             <div className="text-xs font-semibold">
               {isLiveFunding
-                ? 'Operational Funding Live (Vehicle Drawdowns Active)'
+                ? 'Funding state recorded on case'
                 : isGatePassed
                 ? 'All Handoffs & Conditions Satisfied'
                 : 'Fulfillment Execution In Progress'}
@@ -147,9 +147,9 @@ export const DU09PostApprovalFulfillment: React.FC = () => {
                   )}
 
                   <div className="pt-2 border-t border-slate-700/60 flex items-center justify-between text-[11px]">
-                    <span className="text-emerald-400 flex items-center gap-1">
+                    <span className="text-slate-400 flex items-center gap-1">
                       <Check className="w-3 h-3" />
-                      <span>Parameter Check OK (BR-P07: Zero Rekeying)</span>
+                      <span>Case values only; no downstream validation</span>
                     </span>
                     {handoff.status !== 'COMPLETED' && (
                       <button
@@ -220,7 +220,7 @@ export const DU09PostApprovalFulfillment: React.FC = () => {
                               type="text"
                               value={evidenceInput}
                               onChange={(e) => setEvidenceInput(e.target.value)}
-                              placeholder="e.g. Deed_of_Variation_Signed_DocuSign_2026.pdf"
+                              placeholder="Evidence reference (no document upload or verification)"
                               className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white"
                             />
                             <div className="flex justify-end gap-2">
@@ -243,7 +243,7 @@ export const DU09PostApprovalFulfillment: React.FC = () => {
                             onClick={() => setSelectedConditionId(cond.id)}
                             className="text-[11px] text-cyan-400 hover:underline"
                           >
-                            + Attach Verified Evidence Document
+                            + Record Evidence Reference
                           </button>
                         )}
                       </div>
@@ -267,24 +267,27 @@ export const DU09PostApprovalFulfillment: React.FC = () => {
               <div className="p-4 bg-emerald-950/40 border border-emerald-800/80 rounded-xl text-xs space-y-2 text-emerald-300">
                 <div className="flex items-center gap-2 font-bold text-sm">
                   <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                  <span>Wholesale Vehicle Drawdowns Live & Funded</span>
+                  <span>Case marked as funding active — not externally verified</span>
                 </div>
                 <p className="text-slate-300 text-[11px]">
-                  All downstream handoffs complete. Direct debit confirmed with BACS clearing house, and facility limit uplift of £6.0M is active on the SOPRA Apak platform.
+                  This imported or previously recorded case status is not confirmation from a servicing platform. Verify funding through the organization’s approved system.
                 </p>
               </div>
             ) : (
               <div className="space-y-3">
                 <p className="text-xs text-slate-300">
-                  Activates wholesale vehicle drawdowns once legal execution, banking mandates, and 100% Conditions Precedent are verified.
+                    Funding cannot be activated here. Preconditions entered in this workflow are not independently verified, and no servicing integration is configured.
                 </p>
-                <button
-                  onClick={enableOperationalFunding}
-                  disabled={!isGatePassed}
-                  className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md"
-                >
-                  <Zap className="w-4 h-4" />
-                  <span>Pass Gate GATE-09 & Enable Live Operational Funding</span>
+                  <p className="text-xs text-amber-300">
+                    Use the organization’s approved servicing process; this screen cannot initiate or confirm drawdowns.
+                  </p>
+                  <button
+                    onClick={enableOperationalFunding}
+                    disabled
+                    className="w-full py-2.5 bg-slate-800 text-slate-500 font-bold text-xs rounded-lg flex items-center justify-center gap-2 cursor-not-allowed"
+                  >
+                    <Zap className="w-4 h-4" />
+                    <span>Servicing integration unavailable</span>
                 </button>
               </div>
             )}

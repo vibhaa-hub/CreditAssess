@@ -40,12 +40,11 @@ export const DU04DueDiligenceScreening: React.FC = () => {
   const [rationaleInput, setRationaleInput] = useState('');
 
   // CRA form state
-  const [craRatingInput, setCraRatingInput] = useState<CRARating>(
-    activeCase.customerRiskAssessment?.craRating || 'LOW'
+  const [craRatingInput, setCraRatingInput] = useState<CRARating | ''>(
+    activeCase.customerRiskAssessment?.craRating || ''
   );
   const [craRationaleInput, setCraRationaleInput] = useState(
-    activeCase.customerRiskAssessment?.rationale ||
-      'Profitable UK motor retailer with established trading history, clean verified ownership, and zero sanctions exposure.'
+    activeCase.customerRiskAssessment?.rationale || ''
   );
 
   const undispositionedHits = activeCase.screeningFindings.filter(
@@ -93,6 +92,7 @@ export const DU04DueDiligenceScreening: React.FC = () => {
   };
 
   const handleSaveCRA = () => {
+    if (!craRatingInput || !craRationaleInput.trim()) return;
     recordCRA(craRatingInput, craRationaleInput);
   };
 
@@ -109,7 +109,7 @@ export const DU04DueDiligenceScreening: React.FC = () => {
             <span className="text-xs text-slate-400 font-mono">Domain: DOM-02 Financial Crime Compliance</span>
           </div>
           <p className="text-xs text-slate-400">
-            Executes 5 parallel AML/Sanctions checks, enforces Decision Table DT-3 hit disposition (REQ-032 / BR-P03), MLRO escalations (LR-02), and produces statutory Customer Risk Assessment (REQ-029).
+            Displays case screening data and supports human review. No external AML, sanctions, identity, or media screening provider is connected.
           </p>
         </div>
 
@@ -447,13 +447,14 @@ export const DU04DueDiligenceScreening: React.FC = () => {
             />
             <div className="flex justify-between items-center pt-1">
               <span className="text-[11px] text-slate-400">
-                Authorizing FCC Officer: <span className="text-white font-medium">{currentUserRole}</span>
+                Recording role: <span className="text-white font-medium">{currentUserRole}</span>
               </span>
               <button
                 onClick={handleSaveCRA}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs rounded-lg transition-colors shadow-sm"
+                disabled={!craRatingInput || !craRationaleInput.trim()}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-semibold text-xs rounded-lg transition-colors shadow-sm"
               >
-                Save & Attest Formal CRA Outcome
+                Save Human-Entered Risk Assessment
               </button>
             </div>
           </div>

@@ -168,7 +168,7 @@ export const ASTVisualMapModal: React.FC<{ isOpen: boolean; onClose: () => void 
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Interactive process tree showing all Deployable Units, Control Gates, Policy Rules, and Autonomous Agents.
+              Illustrative target workflow; listed activities and integrations are not all implemented.
             </p>
           </div>
           <button
@@ -181,6 +181,9 @@ export const ASTVisualMapModal: React.FC<{ isOpen: boolean; onClose: () => void 
 
         {/* Content Body */}
         <div className="p-6 overflow-y-auto space-y-6">
+          <div className="rounded-lg border border-amber-800 bg-amber-950/30 p-3 text-xs text-amber-200">
+            This map describes the intended process, not proof that its gates, agents, or external provider connections are operational. See the integration status before relying on any workflow.
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {astUnits.map((u) => {
               const isSelected = activeDU === u.num;

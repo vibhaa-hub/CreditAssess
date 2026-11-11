@@ -6,7 +6,7 @@
  * Fully implementing CreditPackAssessmentProcess (DU-01 .. DU-12) with Python Multi-Agent System
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { CreditAssessmentProvider, useCreditAssessment } from './context/CreditAssessmentContext';
 import { Header } from './components/Header';
 import { ASTVisualMapModal } from './components/ASTVisualMapModal';
@@ -57,9 +57,122 @@ const duNavItems = [
 ];
 
 const MainContent: React.FC = () => {
-  const { activeDU, setActiveDU } = useCreditAssessment();
+  const {
+    activeDU,
+    setActiveDU,
+    cases,
+    casesLoading,
+    casesError,
+    caseSaveError,
+    refreshCases,
+    importCase,
+  } = useCreditAssessment();
   const [isAstMapOpen, setIsAstMapOpen] = useState(false);
   const [showPythonConsole, setShowPythonConsole] = useState(true);
+  const [caseFile, setCaseFile] = useState<File | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [integrations, setIntegrations] = useState<{ id: string; purpose: string; status: string }[]>([]);
+
+  useEffect(() => {
+    fetch('/api/integrations')
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Could not load integration status.');
+        setIntegrations(data.integrations);
+      })
+      .catch((error) => console.error('Integration status request failed:', error));
+  }, []);
+
+  const handleCaseImport = async () => {
+    if (!caseFile) return;
+    setImportError(null);
+    try {
+      const importedCase: unknown = JSON.parse(await caseFile.text());
+      await importCase(importedCase);
+      setCaseFile(null);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Could not import this case file.');
+    }
+  };
+
+  if (casesLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
+        <p className="text-sm text-slate-300">Loading persisted credit cases…</p>
+      </div>
+    );
+  }
+
+  if (casesError || cases.length === 0) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 px-6 py-12">
+        <section className="max-w-3xl mx-auto space-y-6">
+          <div>
+            <p className="text-cyan-400 text-xs font-semibold uppercase tracking-widest">ApexCredit workspace</p>
+            <h1 className="mt-2 text-3xl font-bold text-white">
+              {casesError ? 'Case service unavailable' : 'No cases in the database'}
+            </h1>
+            <p className="mt-2 text-sm text-slate-400">
+              Demo cases are no longer loaded automatically. Import an existing case JSON record or connect an
+              approved source system before using the assessment workflow.
+            </p>
+          </div>
+
+          {casesError ? (
+            <div className="rounded-xl border border-rose-800 bg-rose-950/40 p-4 text-sm text-rose-200">
+              <p>{casesError}</p>
+              <button onClick={() => refreshCases().catch(() => {})} className="mt-3 underline">
+                Retry connection
+              </button>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5 space-y-4">
+              <h2 className="font-semibold text-white">Import a case record</h2>
+              <p className="text-xs text-slate-400">
+                Select a JSON file containing one complete CreditCase record. The API validates required fields,
+                writes it to PostgreSQL, and records the import in the append-only audit log.
+              </p>
+              <input
+                type="file"
+                accept="application/json,.json"
+                onChange={(event) => setCaseFile(event.target.files?.[0] ?? null)}
+                className="block w-full text-sm text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-2 file:text-white"
+              />
+              <button
+                disabled={!caseFile}
+                onClick={handleCaseImport}
+                className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Import case
+              </button>
+              {importError && <p role="alert" className="text-sm text-rose-300">{importError}</p>}
+            </div>
+          )}
+
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+            <h2 className="font-semibold text-white">External integrations</h2>
+            <p className="mt-1 text-xs text-slate-400">
+              Configured means credentials are present; connectivity and provider approval still require verification.
+            </p>
+            <ul className="mt-4 divide-y divide-slate-800">
+              {integrations.map((integration) => (
+                <li key={integration.id} className="flex items-center justify-between gap-4 py-2 text-sm">
+                  <span className="text-slate-300">{integration.purpose}</span>
+                  <span className={integration.status === 'NOT_CONFIGURED' ? 'text-amber-300' : 'text-cyan-300'}>
+                    {integration.status.replaceAll('_', ' ')}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <p className="text-xs text-slate-500">
+            Do not upload personal, financial, or confidential customer data until your identity provider, database,
+            access roles, retention rules, and data-processing arrangements have been approved.
+          </p>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
@@ -114,6 +227,11 @@ const MainContent: React.FC = () => {
 
       {/* Main Container */}
       <main className="max-w-7xl mx-auto px-4 py-6 w-full flex-1 space-y-6">
+        {caseSaveError && (
+          <div role="alert" className="rounded-lg border border-rose-800 bg-rose-950/50 px-4 py-3 text-sm text-rose-200">
+            {caseSaveError}
+          </div>
+        )}
         {/* Python Multi-Agent Control Center */}
         {showPythonConsole && <PythonAgentConsole />}
 

@@ -14,11 +14,6 @@ import {
   AlertTriangle,
   Clock,
   TrendingDown,
-  Layers,
-  Lock,
-  Plus,
-  Search,
-  CheckCircle2,
 } from 'lucide-react';
 
 export const DU12GovernanceTelemetry: React.FC = () => {
@@ -26,32 +21,9 @@ export const DU12GovernanceTelemetry: React.FC = () => {
     auditLedger,
     exceptionsRegister,
     telemetry,
-    recordExceptionOverride,
-    activeCase,
   } = useCreditAssessment();
 
   const [activeTab, setActiveTab] = useState<'TELEMETRY' | 'WORM_LEDGER' | 'EXCEPTIONS' | 'GDPR_DSAR'>('TELEMETRY');
-
-  // New Exception state
-  const [excType, setExcType] = useState('POLICY_OVERRIDE_RECENCY_TOLERANCE');
-  const [excReason, setExcReason] = useState('');
-
-  // DSAR state
-  const [dsarName, setDsarName] = useState('Arthur Pendelton');
-  const [dsarResult, setDsarResult] = useState<string | null>(null);
-
-  const handleRecordException = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!excReason.trim()) return;
-    recordExceptionOverride(excType, excReason);
-    setExcReason('');
-  };
-
-  const handleRunDSAR = () => {
-    setDsarResult(
-      `GDPR Subject Access Dossier compiled for ${dsarName}. Scanned 12 cases across Franchise, Wholesale, and Fleet. Found 1 ID&V check, 2 Credit Bureau searches, 1 Director PSC declaration. Lawful basis: Contractual necessity (Art 6(1)(b)) & Legal obligation (Art 6(1)(c)). All non-pertinent third-party PII redacted.`
-    );
-  };
 
   return (
     <div className="space-y-6">
@@ -66,7 +38,7 @@ export const DU12GovernanceTelemetry: React.FC = () => {
             <span className="text-xs text-slate-400 font-mono">Domain: DOM-08 Risk, Governance & BI</span>
           </div>
           <p className="text-xs text-slate-400">
-            Immutable WORM audit ledger (REQ-085 / LR-06), policy exception register (REQ-091 / BR-E04), GDPR DSAR servicing (REQ-087), and real-time elapsed effort reduction telemetry (CALC-013 vs 90m baseline).
+            Persisted case audit events are hash-chained. Effort measurement, durable exception handling, and GDPR DSAR servicing are not yet integrated.
           </p>
         </div>
 
@@ -88,7 +60,7 @@ export const DU12GovernanceTelemetry: React.FC = () => {
             }`}
           >
             <FileCheck2 className="w-3.5 h-3.5" />
-            <span>WORM Audit Trail ({auditLedger.length})</span>
+            <span>Hash-Chained Audit Events ({auditLedger.length})</span>
           </button>
           <button
             onClick={() => setActiveTab('EXCEPTIONS')}
@@ -97,7 +69,7 @@ export const DU12GovernanceTelemetry: React.FC = () => {
             }`}
           >
             <AlertTriangle className="w-3.5 h-3.5" />
-            <span>Exceptions Register ({exceptionsRegister.length})</span>
+            <span>Exceptions (not persisted)</span>
           </button>
           <button
             onClick={() => setActiveTab('GDPR_DSAR')}
@@ -119,33 +91,41 @@ export const DU12GovernanceTelemetry: React.FC = () => {
             <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl space-y-2">
               <span className="text-slate-400 text-xs block font-medium">Pack Preparation Effort (CALC-013)</span>
               <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-bold font-mono text-emerald-300">
-                  {telemetry.totalEffortMinutes} min
+                <span className="text-2xl font-bold font-mono text-amber-300">
+                  {telemetry.isMeasured ? `${telemetry.totalEffortMinutes} min` : 'Not measured'}
                 </span>
-                <span className="text-xs text-slate-400">vs 90.0m Baseline</span>
+                <span className="text-xs text-slate-400">
+                  {telemetry.isMeasured ? `vs ${telemetry.baselineBenchmarkMinutes}m baseline` : 'Time tracking is not instrumented'}
+                </span>
               </div>
-              <div className="flex items-center gap-1 text-emerald-400 font-bold text-xs">
-                <TrendingDown className="w-4 h-4" />
-                <span>{telemetry.effortSavingsPct}% Active Effort Saved (OBJ-01)</span>
-              </div>
+              {telemetry.isMeasured && (
+                <div className="flex items-center gap-1 text-emerald-400 font-bold text-xs">
+                  <TrendingDown className="w-4 h-4" />
+                  <span>{telemetry.effortSavingsPct}% Active Effort Saved</span>
+                </div>
+              )}
             </div>
 
             <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl space-y-2">
               <span className="text-slate-400 text-xs block font-medium">Total Work Volume (REQ-094)</span>
-              <div className="text-2xl font-bold font-mono text-cyan-300">42 Cases</div>
-              <p className="text-[11px] text-slate-400">Wholesale: 18 | Franchise: 12 | Fleet: 8</p>
+              <div className="text-2xl font-bold font-mono text-cyan-300">{telemetry.totalCaseCount} Cases</div>
+              <p className="text-[11px] text-slate-400">
+                Wholesale: {telemetry.caseVolumeByLine.WHOLESALE} | Franchise: {telemetry.caseVolumeByLine.FRANCHISE} | Fleet: {telemetry.caseVolumeByLine.FLEET}
+              </p>
             </div>
 
             <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl space-y-2">
               <span className="text-slate-400 text-xs block font-medium">First-Time Complete Quality (OBJ-03)</span>
-              <div className="text-2xl font-bold font-mono text-purple-300">92.8%</div>
-              <p className="text-[11px] text-slate-400">Credit Queries Raised: {telemetry.queryCount} (Low rework)</p>
+              <div className="text-2xl font-bold font-mono text-purple-300">Not measured</div>
+              <p className="text-[11px] text-slate-400">
+                Active case queries: {telemetry.queryCount} | Resolved query count: {telemetry.reworkCount}
+              </p>
             </div>
 
             <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl space-y-2">
               <span className="text-slate-400 text-xs block font-medium">Overdue Periodic Reviews (OBJ-05)</span>
-              <div className="text-2xl font-bold font-mono text-emerald-300">0</div>
-              <p className="text-[11px] text-slate-400">100% adherence to DT-4 review cadence</p>
+              <div className="text-2xl font-bold font-mono text-emerald-300">{telemetry.overdueReviewCount}</div>
+              <p className="text-[11px] text-slate-400">Based on persisted case review schedules</p>
             </div>
           </div>
 
@@ -162,6 +142,9 @@ export const DU12GovernanceTelemetry: React.FC = () => {
             </div>
 
             <div className="space-y-3">
+              {telemetry.stageEffort.length === 0 && (
+                <p className="text-xs text-amber-300">No measured stage-effort data is available yet.</p>
+              )}
               {telemetry.stageEffort.map((st, idx) => {
                 const pct = (st.minutes / telemetry.totalEffortMinutes) * 100;
                 return (
@@ -184,16 +167,16 @@ export const DU12GovernanceTelemetry: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 2: WORM Audit Ledger (REQ-085, LR-06, BR-G02) */}
+      {/* Tab 2: Persisted hash-chained audit events */}
       {activeTab === 'WORM_LEDGER' && (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4 shadow-lg">
           <div className="flex items-center justify-between pb-3 border-b border-slate-800">
             <div className="flex items-center gap-2">
               <FileCheck2 className="w-4 h-4 text-purple-400" />
-              <h2 className="text-sm font-bold text-white">WORM Compliant Cryptographic Audit Trail (REQ-085 / LR-06)</h2>
+              <h2 className="text-sm font-bold text-white">Append-Only Hash-Chained Audit Events</h2>
             </div>
             <span className="text-[10px] font-mono text-purple-300 bg-purple-950 px-2 py-0.5 rounded border border-purple-800">
-              FCA SYSC Record-Keeping
+              PostgreSQL audit events
             </span>
           </div>
 
@@ -201,7 +184,7 @@ export const DU12GovernanceTelemetry: React.FC = () => {
             <table className="w-full text-left text-xs divide-y divide-slate-800">
               <thead>
                 <tr className="bg-slate-800/50 text-slate-400">
-                  <th className="py-2.5 px-3 font-semibold">Block ID</th>
+                  <th className="py-2.5 px-3 font-semibold">Event ID</th>
                   <th className="py-2.5 px-3 font-semibold">Timestamp (UTC)</th>
                   <th className="py-2.5 px-3 font-semibold">Actor & Role</th>
                   <th className="py-2.5 px-3 font-semibold">Deployable Unit</th>
@@ -217,9 +200,9 @@ export const DU12GovernanceTelemetry: React.FC = () => {
                     <td className="py-2.5 px-3 font-mono text-[11px] text-slate-300">{record.timestamp}</td>
                     <td className="py-2.5 px-3">
                       <div className="font-semibold text-white">{record.actorId}</div>
-                      <span className="text-[10px] text-slate-400 font-mono">{record.actorRole}</span>
+                      <span className="text-[10px] text-slate-400 font-mono">{record.actorRole ?? 'Verified identity'}</span>
                     </td>
-                    <td className="py-2.5 px-3 text-[11px] text-slate-300">{record.deployableUnit.split(' ')[0]}</td>
+                    <td className="py-2.5 px-3 text-[11px] text-slate-300">{record.deployableUnit?.split(' ')[0] ?? '—'}</td>
                     <td className="py-2.5 px-3 font-semibold text-cyan-300">{record.action}</td>
                     <td className="py-2.5 px-3 text-[11px] text-slate-300 max-w-xs">{record.details}</td>
                     <td className="py-2.5 px-3 font-mono text-[10px] text-purple-300">{record.hash.slice(0, 16)}...</td>
@@ -233,53 +216,15 @@ export const DU12GovernanceTelemetry: React.FC = () => {
 
       {/* Tab 3: Policy Overrides & Exception Register (REQ-091, BR-E04) */}
       {activeTab === 'EXCEPTIONS' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Log Exception Form */}
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
-            <h2 className="text-sm font-bold text-white flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-400" />
-              <span>Log Policy Exception (REQ-091 / BR-E04)</span>
-            </h2>
-            <form onSubmit={handleRecordException} className="space-y-3 text-xs">
-              <div>
-                <label className="text-slate-400 block mb-1">Exception / Policy Override Type</label>
-                <select
-                  value={excType}
-                  onChange={(e) => setExcType(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white"
-                >
-                  <option value="POLICY_OVERRIDE_RECENCY_TOLERANCE">Policy Override: Recency Window Tolerance</option>
-                  <option value="POLICY_OVERRIDE_COVENANT_CURTAILMENT">Policy Override: Stock Curtailment Schedule</option>
-                  <option value="POLICY_OVERRIDE_GEARING_HEADROOM">Policy Override: Gearing Benchmark Buffer</option>
-                  <option value="POLICY_OVERRIDE_MISSING_EVIDENCE_GRACE">Policy Override: 14-Day Evidence Grace</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-slate-400 block mb-1">Commercial / Governance Business Rationale</label>
-                <textarea
-                  rows={4}
-                  value={excReason}
-                  onChange={(e) => setExcReason(e.target.value)}
-                  placeholder="State detailed business justification, risk mitigating controls, and authorized approval basis..."
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white focus:outline-none focus:border-cyan-500"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Commit Authorized Exception (BR-E04)</span>
-              </button>
-            </form>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400" />
+            <h2 className="text-sm font-bold text-white">Policy Exceptions</h2>
           </div>
-
-          {/* Exceptions Register Table */}
-          <div className="lg:col-span-2 space-y-3">
-            <h2 className="text-sm font-bold text-white">ExceptionRegisterRecord ({exceptionsRegister.length})</h2>
-            {exceptionsRegister.map((exc) => (
+          <p className="text-xs text-amber-200">
+            Exception recording and independent approval are not implemented. Do not treat this screen as an exception register.
+          </p>
+          {exceptionsRegister.map((exc) => (
               <div
                 key={exc.id}
                 className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-xs space-y-2"
@@ -294,8 +239,7 @@ export const DU12GovernanceTelemetry: React.FC = () => {
                   <span className="font-mono text-cyan-400">Case: {exc.caseId}</span>
                 </div>
               </div>
-            ))}
-          </div>
+          ))}
         </div>
       )}
 
@@ -305,43 +249,20 @@ export const DU12GovernanceTelemetry: React.FC = () => {
           <div className="flex items-center justify-between pb-3 border-b border-slate-800">
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-cyan-400" />
-              <h2 className="text-sm font-bold text-white">ServiceGDPRDataSubjectRequests (REQ-087 / LR-04)</h2>
+              <h2 className="text-sm font-bold text-white">GDPR Data Subject Access Requests</h2>
             </div>
-            <span className="text-[10px] font-mono text-cyan-300 bg-slate-800 px-2 py-0.5 rounded">
-              UK GDPR Compliance
+            <span className="text-[10px] font-mono text-amber-300 bg-slate-800 px-2 py-0.5 rounded">
+              Not Implemented
             </span>
           </div>
 
           <p className="text-xs text-slate-400">
-            Scans all case vaults, credit archives, and identity graphs to compile personal data records upon receipt of a GDPR Data Subject Access Request (DSAR).
+            DSAR lookup, identity verification, redaction, and response tracking are not connected. Do not enter personal data here.
           </p>
 
-          <div className="flex gap-3 text-xs">
-            <input
-              type="text"
-              value={dsarName}
-              onChange={(e) => setDsarName(e.target.value)}
-              placeholder="Data Subject Name (e.g. Arthur Pendelton)"
-              className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white"
-            />
-            <button
-              onClick={handleRunDSAR}
-              className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
-            >
-              <Search className="w-4 h-4" />
-              <span>Compile Subject Access Dossier</span>
-            </button>
+          <div className="rounded-lg border border-amber-800 bg-amber-950/30 p-3 text-xs text-amber-200">
+            DSAR service unavailable — use the organization’s approved privacy-operations process.
           </div>
-
-          {dsarResult && (
-            <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 text-xs text-slate-200 leading-relaxed space-y-2">
-              <div className="flex items-center gap-2 text-emerald-400 font-bold">
-                <CheckCircle2 className="w-4 h-4" />
-                <span>GDPR Subject Information Dossier Generated (REQ-087)</span>
-              </div>
-              <p className="text-slate-300 text-[11px]">{dsarResult}</p>
-            </div>
-          )}
         </div>
       )}
     </div>

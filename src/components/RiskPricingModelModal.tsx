@@ -2,9 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * ApexCredit Risk & Pricing Prediction Model Inspector
- * Demonstrates differential loan structuring (e.g., two £7M loans for different companies)
- * and guarantees that final credit decisions remain strictly with human underwriters (BR-G01).
+ * Illustrative risk and pricing simulator. Outputs are not validated for live credit decisions.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -78,9 +76,9 @@ export const RiskPricingModelModal: React.FC<RiskPricingModelModalProps> = ({ is
               <Calculator className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white">Commercial Credit Risk, Pricing & Workflow Prediction Model</h3>
+              <h3 className="text-base font-bold text-white">Illustrative Risk & Pricing Simulator</h3>
               <p className="text-xs text-slate-400">
-                Multifactor underwriting model predicting pricing margins, advance rates, and workflow paths.
+                Prototype estimates only; this model is not validated or approved for real credit decisions.
               </p>
             </div>
           </div>
@@ -92,12 +90,12 @@ export const RiskPricingModelModal: React.FC<RiskPricingModelModalProps> = ({ is
           </button>
         </div>
 
-        {/* FCA Compliance Banner */}
+        {/* Model validity disclaimer */}
         <div className="px-6 py-2.5 bg-indigo-950/40 border-b border-indigo-800/40 flex items-center justify-between text-xs text-indigo-200">
           <div className="flex items-center space-x-2">
             <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0" />
             <span>
-              <strong>FCA Compliance Mandate (BR-G01):</strong> This model predicts risk grades, pricing, and covenants; final credit approval is executed exclusively by certified human underwriters.
+              <strong>Illustrative only:</strong> Sample scenarios and simulator outputs are not calibrated to a validated portfolio model and must not be used to approve, price, or decline credit.
             </span>
           </div>
         </div>

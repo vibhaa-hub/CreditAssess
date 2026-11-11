@@ -34,6 +34,7 @@ export const Header: React.FC<{ onOpenAstMap: () => void }> = ({ onOpenAstMap })
     activeCaseId,
     activeCase,
     selectCase,
+    authorizedRoles,
     currentUserRole,
     setCurrentUserRole,
     telemetry,
@@ -90,25 +91,28 @@ export const Header: React.FC<{ onOpenAstMap: () => void }> = ({ onOpenAstMap })
           </span>
         </div>
 
-        {/* Live Role Switcher (Segregation of Duties Demo) */}
+        {/* Active role is selected from authenticated OIDC role claims */}
         <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
           <UserCheck className="w-4 h-4 text-amber-400" />
           <div className="flex flex-col">
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] uppercase text-slate-400 font-medium">Active User Role</span>
-              <span className="text-[9px] text-slate-400">(4-Eyes Segregation)</span>
+              <span className="text-[10px] uppercase text-slate-400 font-medium">Authorized role</span>
             </div>
-            <select
-              value={currentUserRole}
-              onChange={(e) => setCurrentUserRole(e.target.value as UserRole)}
-              className="bg-transparent text-xs font-semibold text-amber-300 focus:outline-none cursor-pointer"
-            >
-              {Object.entries(roleLabels).map(([role, { title }]) => (
-                <option key={role} value={role} className="bg-slate-800 text-white">
-                  {title}
-                </option>
-              ))}
-            </select>
+            {authorizedRoles.length > 0 ? (
+              <select
+                value={authorizedRoles.includes(currentUserRole) ? currentUserRole : authorizedRoles[0]}
+                onChange={(e) => setCurrentUserRole(e.target.value as UserRole)}
+                className="bg-transparent text-xs font-semibold text-amber-300 focus:outline-none cursor-pointer"
+              >
+                {authorizedRoles.map((role) => (
+                  <option key={role} value={role} className="bg-slate-800 text-white">
+                    {roleLabels[role].title}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="text-xs font-semibold text-rose-300">No application role assigned</span>
+            )}
           </div>
         </div>
 
@@ -124,19 +128,25 @@ export const Header: React.FC<{ onOpenAstMap: () => void }> = ({ onOpenAstMap })
         </div>
       </div>
 
-      {/* Sub-bar: Telemetry Snapshot & WORM Blockchain Ledger Height */}
+      {/* Sub-bar: Measured telemetry and persisted audit events */}
       <div className="bg-slate-950/70 border-t border-slate-800/60 px-4 py-1.5 text-xs text-slate-400 flex flex-wrap items-center justify-between gap-4">
         <div className="max-w-7xl mx-auto w-full flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-1.5 text-slate-300">
               <Clock className="w-3.5 h-3.5 text-emerald-400" />
               <span>Effort Telemetry (CALC-013):</span>
-              <span className="font-semibold text-emerald-300">{telemetry.totalEffortMinutes} min</span>
-              <span className="text-slate-500">vs 90m baseline</span>
-              <span className="inline-flex items-center gap-0.5 text-emerald-400 font-bold bg-emerald-950/80 px-1.5 py-0.2 rounded border border-emerald-900/60">
-                <TrendingDown className="w-3 h-3" />
-                {telemetry.effortSavingsPct}% reduction
-              </span>
+              {telemetry.isMeasured ? (
+                <>
+                  <span className="font-semibold text-emerald-300">{telemetry.totalEffortMinutes} min</span>
+                  <span className="text-slate-500">vs 90m baseline</span>
+                  <span className="inline-flex items-center gap-0.5 text-emerald-400 font-bold bg-emerald-950/80 px-1.5 py-0.2 rounded border border-emerald-900/60">
+                    <TrendingDown className="w-3 h-3" />
+                    {telemetry.effortSavingsPct}% reduction
+                  </span>
+                </>
+              ) : (
+                <span className="font-semibold text-amber-300">Not instrumented</span>
+              )}
             </div>
 
             <div className="hidden md:flex items-center gap-2 text-slate-300">
@@ -155,8 +165,8 @@ export const Header: React.FC<{ onOpenAstMap: () => void }> = ({ onOpenAstMap })
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
               <FileCheck2 className="w-3.5 h-3.5 text-purple-400" />
-              <span>WORM Audit Ledger:</span>
-              <span className="text-purple-300 font-mono font-semibold">{auditLedger.length} blocks</span>
+              <span>Case Audit Events:</span>
+              <span className="text-purple-300 font-mono font-semibold">{auditLedger.length}</span>
               <span className="text-slate-500">({auditLedger[auditLedger.length - 1]?.hash.slice(0, 14)}...)</span>
             </div>
           </div>

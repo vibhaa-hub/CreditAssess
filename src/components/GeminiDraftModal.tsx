@@ -2,8 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Interactive Gemini 3.8 Flash Drafting Modal
- * Provides progressive disclosure of prompt context, model responses, inline citation badges, diffing, and FCA human signoff.
+ * AI drafting modal for the supplied case context.
  */
 
 import React, { useState } from 'react';
@@ -34,7 +33,8 @@ export const GeminiDraftModal: React.FC<GeminiDraftModalProps> = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [generatedText, setGeneratedText] = useState('');
-  const [aiMetadata, setAiMetadata] = useState<{ model: string; isLiveAi: boolean; timestamp: string; fcaLabel?: string } | null>(null);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [aiMetadata, setAiMetadata] = useState<{ model: string; isLiveAi: boolean; timestamp: string } | null>(null);
   const [activeTab, setActiveTab] = useState<'preview' | 'prompt' | 'diff'>('preview');
   const [editedText, setEditedText] = useState('');
 
@@ -42,6 +42,7 @@ export const GeminiDraftModal: React.FC<GeminiDraftModalProps> = ({
 
   const handleGenerate = async () => {
     setLoading(true);
+    setGenerationError(null);
     try {
       const res = await fetch('/api/gemini/generate-narrative', {
         method: 'POST',
@@ -55,16 +56,21 @@ export const GeminiDraftModal: React.FC<GeminiDraftModalProps> = ({
         }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || `Draft generation failed (${res.status}).`);
+      }
+      if (typeof data.text !== 'string' || !data.text.trim()) {
+        throw new Error('The AI provider returned an empty draft.');
+      }
       setGeneratedText(data.text);
       setEditedText(data.text);
       setAiMetadata({
         model: data.model,
         isLiveAi: data.isLiveAi,
         timestamp: data.timestamp,
-        fcaLabel: data.fcaLabel,
       });
     } catch (err) {
-      console.error('Failed to generate with Gemini:', err);
+      setGenerationError(err instanceof Error ? err.message : 'Draft generation failed.');
     } finally {
       setLoading(false);
     }
@@ -99,13 +105,13 @@ export const GeminiDraftModal: React.FC<GeminiDraftModalProps> = ({
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <h3 className="text-base font-bold text-white">Gemini 3.8 Flash Drafting Copilot</h3>
+                <h3 className="text-base font-bold text-white">AI Draft Assistant</h3>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono">
                   {sectionTitle}
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Grounding against active dealership record: <strong className="text-slate-200">{dealerName}</strong>
+                Case context: <strong className="text-slate-200">{dealerName}</strong>
               </p>
             </div>
           </div>
@@ -118,16 +124,16 @@ export const GeminiDraftModal: React.FC<GeminiDraftModalProps> = ({
           </button>
         </div>
 
-        {/* FCA Regulatory Notice Bar */}
+        {/* AI output and verification notice */}
         <div className="px-6 py-2.5 bg-amber-950/30 border-b border-amber-800/30 flex items-center justify-between text-xs text-amber-200/90">
           <div className="flex items-center space-x-2">
             <Scale className="w-4 h-4 text-amber-400 flex-shrink-0" />
             <span>
-              <strong>FCA BR-G01 & BR-G06 Notice:</strong> Generated commentary is assistive. All statements require Account Manager attestation before Underwriting submission.
+              <strong>AI-generated content:</strong> It may be inaccurate. Verify every statement against source evidence; no registry, bureau, or document integrations are connected.
             </span>
           </div>
           <span className="font-mono text-[10px] bg-slate-950/80 px-2 py-0.5 rounded border border-amber-500/30 text-amber-300">
-            FCA SYSC 15A
+            Verify before use
           </span>
         </div>
 
@@ -175,22 +181,26 @@ export const GeminiDraftModal: React.FC<GeminiDraftModalProps> = ({
             className="mb-2 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center space-x-1.5 shadow-md shadow-indigo-600/30 disabled:opacity-50 transition-all"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            <span>{generatedText ? 'Re-generate with Gemini' : 'Generate with Gemini 3.8 Flash'}</span>
+            <span>{generatedText ? 'Re-generate draft' : 'Generate AI draft'}</span>
           </button>
         </div>
 
         {/* Modal Body */}
         <div className="p-6 overflow-y-auto flex-1 space-y-4">
-          {loading ? (
+          {generationError ? (
+            <div className="rounded-lg border border-red-800 bg-red-950/40 p-3 text-xs text-red-200">
+              {generationError}
+            </div>
+          ) : loading ? (
             <div className="py-16 text-center space-y-3">
               <div className="inline-block p-4 rounded-full bg-indigo-500/10 border border-indigo-500/30 animate-pulse text-indigo-400">
                 <Sparkles className="w-8 h-8 animate-spin" />
               </div>
               <p className="text-sm font-medium text-slate-200">
-                Synthesizing commercial credit commentary via Gemini 3.8 Flash...
+                Generating a draft from the supplied case context...
               </p>
               <p className="text-xs text-slate-400">
-                Grounding facts against audited financials, Companies House filings, and CRA commercial bureau reports.
+                No external registry, audited-document, or credit-bureau data is queried.
               </p>
             </div>
           ) : !generatedText ? (
@@ -198,14 +208,14 @@ export const GeminiDraftModal: React.FC<GeminiDraftModalProps> = ({
               <Sparkles className="w-10 h-10 text-indigo-400 mx-auto opacity-70" />
               <h4 className="text-sm font-semibold text-white">No Gemini Draft Generated Yet</h4>
               <p className="text-xs text-slate-400 max-w-md mx-auto">
-                Click <strong>"Generate with Gemini 3.8 Flash"</strong> above to construct an FCA-compliant commercial narrative with embedded document citations.
+                Generate an AI draft from the supplied case context. It is not compliance-approved and its claims must be checked against source evidence.
               </p>
             </div>
           ) : (
             <>
               {activeTab === 'preview' && (
                 <div className="space-y-4">
-                  {/* Generated text with citations highlighted */}
+                  {/* Source-reference markers are model-generated and not verified. */}
                   <div className="p-4 rounded-xl bg-slate-950/90 border border-slate-800 text-slate-200 text-sm leading-relaxed whitespace-pre-wrap">
                     {renderHighlightedText(editedText)}
                   </div>
@@ -230,7 +240,7 @@ export const GeminiDraftModal: React.FC<GeminiDraftModalProps> = ({
                         <span className="font-mono text-indigo-300">Engine: {aiMetadata.model}</span>
                         <span className="text-slate-600">|</span>
                         <span className={`px-2 py-0.5 rounded text-[10px] font-mono ${aiMetadata.isLiveAi ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-300'}`}>
-                          {aiMetadata.isLiveAi ? 'Live Gemini 3.8 Flash' : 'Deterministic Fallback Synthesizer'}
+                          {aiMetadata.isLiveAi ? 'AI provider response' : 'Provider not confirmed'}
                         </span>
                       </div>
                       <span className="text-[11px] font-mono text-slate-400">
@@ -250,7 +260,7 @@ export const GeminiDraftModal: React.FC<GeminiDraftModalProps> = ({
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-indigo-950/30 border border-indigo-800/40">
-                    <span className="text-indigo-300 font-semibold block mb-2">Proposed Gemini 3.8 Flash Draft:</span>
+                    <span className="text-indigo-300 font-semibold block mb-2">Proposed AI draft:</span>
                     <div className="text-slate-200 leading-relaxed whitespace-pre-wrap">
                       {renderHighlightedText(editedText)}
                     </div>
