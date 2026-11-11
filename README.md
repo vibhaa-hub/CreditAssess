@@ -13,7 +13,25 @@ ApexCredit is a credit-assessment workflow application. The repository currently
 - Explicit integration readiness status. A status of `CONFIGURED_UNVERIFIED` means only that environment variables exist; no external provider has been contacted.
 - AI drafting endpoints return an error when Gemini is unavailable instead of substituting fabricated credit or screening commentary.
 
-Several workflow screens, risk calculations, agent tools, telemetry, exception handling, and provider-style features still contain prototype logic. Provider integrations, document retention, file storage, comprehensive data validation, organization-specific authorization, operational monitoring, backup/restore, and compliance approval remain required before production use.
+Experimental risk scoring, policy retrieval, rule evaluation, ADK sessions, and HITL endpoints are disabled because their bundled implementations are not production-validated. Unused experimental modules remain in the repository but are not exposed through the worker allowlist or enabled UI. Provider integrations, document retention, file storage, comprehensive data validation, organization-specific authorization, operational monitoring, backup/restore, and compliance approval remain required before production use.
+
+## Python worker and agents
+
+The Express API starts the Python worker as a bounded subprocess. Python dependencies for the enabled paths use the standard library; no Python package installation is required. The worker accepts only JSON input and allows these commands:
+
+- `list-agents`: reports the current bounded capabilities.
+- `evaluate-all`: read-only analysis of a case loaded from PostgreSQL by the authenticated API. It does not write decisions or invoke external providers.
+- `docling-extract`: despite the legacy command name, currently parses uploaded UTF-8 CSV bytes only. It enforces 2 MB, 2,000-row, 100-column, and 20,000-character-per-cell limits. It returns source-preserving cells and a SHA-256 content hash; it does not persist the file, verify it, map financial meaning, reconcile statements, or support PDF/OCR/Excel/iXBRL.
+
+The available agents validate supplied intake values, calculate a limited set of financial ratios only when required inputs are present, summarize case-record screening flags without claiming live checks, and report completeness without transmitting a submission. Their output is analytical-only and is not an approval or credit decision. Live screening, document storage/parsing, credit submission, approved policy/rules, persisted human attestations, and a validated risk model are not configured.
+
+Run the Python boundary tests from the project root:
+
+```powershell
+python -m unittest discover -s python_agents/tests
+```
+
+The server uses `python` on Windows and `python3` on other platforms by default; set `PYTHON_EXECUTABLE` if the intended interpreter is not on `PATH`.
 
 ## Local setup
 

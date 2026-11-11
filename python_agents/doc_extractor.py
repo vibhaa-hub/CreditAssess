@@ -1,129 +1,169 @@
-"""
-ApexCredit Document Ingestion & Extraction Engine
-Implements the Docling / Advanced OCR Parsing Architecture for UK Commercial Lending:
-- Extracts structured tables (P&L, Balance Sheet, Debentures) with bounding-box coordinates
-- Extracts textual clauses with confidence scores and page numbers
-- Maps extracted cells into normalized Chart of Accounts (REQ-038)
+"""Extract source-preserving rows from uploaded CSV documents.
+
+This module intentionally does not infer financial meaning, verify documents, or
+pretend to parse PDFs/images. Those capabilities require a separately validated
+parser and evidence workflow.
 """
 
-from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Any, Optional
-import time
+from __future__ import annotations
+
+import csv
 import hashlib
+import io
+import uuid
+from dataclasses import asdict, dataclass
+from decimal import Decimal, InvalidOperation
+from pathlib import PurePath
+from typing import Any
 
-@dataclass
+
+MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
+MAX_ROWS = 2_000
+MAX_COLUMNS = 100
+MAX_CELL_CHARS = 20_000
+
+
+class DocumentExtractionError(ValueError):
+    """Raised when a document is unsupported or exceeds safe parser limits."""
+
+
+@dataclass(frozen=True)
 class ExtractedCell:
     row_idx: int
     col_idx: int
     header: str
     raw_text: str
-    normalized_value: float
-    confidence: float
-    bbox: List[float]  # [x0, y0, x1, y1]
+    normalized_value: str | None
+    confidence: None = None
+    bbox: None = None
 
-@dataclass
+
+@dataclass(frozen=True)
 class ExtractedTable:
     table_id: str
-    page_number: int
-    table_type: str  # "PROFIT_AND_LOSS", "BALANCE_SHEET", "DEBENTURE_SCHEDULE"
+    page_number: None
+    table_type: str
     rows: int
     columns: int
-    cells: List[ExtractedCell]
+    cells: list[ExtractedCell]
     reconciliation_status: str
 
-@dataclass
+
+@dataclass(frozen=True)
 class DocumentParseResult:
     document_id: str
     filename: str
-    doc_format: str  # "PDF", "CH_IXBRL", "SCANNED_TIFF", "EXCEL"
-    parser_engine: str  # "Docling-Hybrid-v2.1", "Tesseract-OCR", "iXBRL-Native"
-    page_count: int
-    overall_confidence: float
-    extracted_tables: List[ExtractedTable]
-    extracted_metadata: Dict[str, Any]
+    doc_format: str
+    parser_engine: str
+    row_count: int
+    extracted_tables: list[ExtractedTable]
+    extracted_metadata: dict[str, Any]
     provenance_hash: str
 
+
+def _numeric_value(raw_text: str) -> str | None:
+    value = raw_text.strip().replace(",", "").replace("£", "").replace("$", "").replace("€", "")
+    if value.startswith("(") and value.endswith(")"):
+        value = f"-{value[1:-1].strip()}"
+    if value.endswith("%"):
+        value = value[:-1].strip()
+    try:
+        number = Decimal(value)
+    except InvalidOperation:
+        return None
+    if not number.is_finite():
+        return None
+    return format(number, "f")
+
+
 class DoclingExtractionEngine:
-    """
-    Simulated Enterprise Docling & OCR Extractor
-    Parses unstructured and semi-structured motor dealer credit documents into structured AST records.
-    """
-    def __init__(self):
-        self.supported_formats = ["PDF", "TIFF", "JPEG", "XLSX", "XML_IXBRL"]
+    """Bounded CSV text/table extraction with content-based provenance."""
 
-    def extract_document(self, filename: str, doc_category: str = "FINANCIAL_ACCOUNTS") -> DocumentParseResult:
-        """
-        Parses document using the Docling table-structure recovery algorithm and OCR.
-        """
-        doc_id = f"DOC-{int(time.time())}-{hashlib.md5(filename.encode()).hexdigest()[:6]}"
-        is_scanned = "scan" in filename.lower() or filename.endswith(".tiff") or filename.endswith(".jpg")
-        parser_name = "Docling-OCR-Pipeline" if is_scanned else "Docling-Document-Converter-v2.1"
-        confidence = 0.94 if is_scanned else 0.99
+    def extract_document(
+        self,
+        filename: str,
+        document_bytes: bytes,
+        doc_category: str = "FINANCIAL_ACCOUNTS",
+    ) -> DocumentParseResult:
+        safe_filename = PurePath(filename.replace("\\", "/")).name
+        if not safe_filename or safe_filename in {".", ".."}:
+            raise DocumentExtractionError("A valid document filename is required.")
+        if len(document_bytes) == 0:
+            raise DocumentExtractionError("The uploaded document is empty.")
+        if len(document_bytes) > MAX_DOCUMENT_BYTES:
+            raise DocumentExtractionError("CSV documents must be 2 MB or smaller.")
+        if PurePath(safe_filename).suffix.lower() != ".csv":
+            raise DocumentExtractionError(
+                "Only CSV extraction is currently available. PDF, scanned-image, Excel, "
+                "and iXBRL parsing are not configured."
+            )
+        if not isinstance(doc_category, str) or not doc_category.strip() or len(doc_category) > 80:
+            raise DocumentExtractionError("A document category of at most 80 characters is required.")
 
-        # Simulated Docling structured table extraction for FY24 financial statement
-        pnl_cells = [
-            ExtractedCell(0, 0, "Metric", "Turnover / Revenue", 18500000.0, 0.99, [45.0, 120.0, 220.0, 135.0]),
-            ExtractedCell(0, 1, "FY2024", "£18,500,000", 18500000.0, 0.99, [240.0, 120.0, 310.0, 135.0]),
-            ExtractedCell(1, 0, "Metric", "Cost of Sales", 15725000.0, 0.98, [45.0, 140.0, 220.0, 155.0]),
-            ExtractedCell(1, 1, "FY2024", "£15,725,000", 15725000.0, 0.98, [240.0, 140.0, 310.0, 155.0]),
-            ExtractedCell(2, 0, "Metric", "Operating Profit (EBIT)", 1100000.0, 0.99, [45.0, 160.0, 220.0, 175.0]),
-            ExtractedCell(2, 1, "FY2024", "£1,100,000", 1100000.0, 0.99, [240.0, 160.0, 310.0, 175.0]),
-            ExtractedCell(3, 0, "Metric", "Interest Payable", 219000.0, 0.97, [45.0, 180.0, 220.0, 195.0]),
-            ExtractedCell(3, 1, "FY2024", "£219,000", 219000.0, 0.97, [240.0, 180.0, 310.0, 195.0]),
-            ExtractedCell(4, 0, "Metric", "Net Profit", 710000.0, 0.99, [45.0, 200.0, 220.0, 215.0]),
-            ExtractedCell(4, 1, "FY2024", "£710,000", 710000.0, 0.99, [240.0, 200.0, 310.0, 215.0]),
-        ]
+        try:
+            text = document_bytes.decode("utf-8-sig")
+        except UnicodeDecodeError as error:
+            raise DocumentExtractionError("CSV must be encoded as UTF-8.") from error
 
-        bs_cells = [
-            ExtractedCell(0, 0, "Line Item", "Vehicle Stock (Inventory)", 2850000.0, 0.99, [45.0, 250.0, 220.0, 265.0]),
-            ExtractedCell(0, 1, "FY2024", "£2,850,000", 2850000.0, 0.99, [240.0, 250.0, 310.0, 265.0]),
-            ExtractedCell(1, 0, "Line Item", "Current Assets", 3920000.0, 0.98, [45.0, 270.0, 220.0, 285.0]),
-            ExtractedCell(1, 1, "FY2024", "£3,920,000", 3920000.0, 0.98, [240.0, 270.0, 310.0, 285.0]),
-            ExtractedCell(2, 0, "Line Item", "Current Liabilities", 2450000.0, 0.97, [45.0, 290.0, 220.0, 305.0]),
-            ExtractedCell(2, 1, "FY2024", "£2,450,000", 2450000.0, 0.97, [240.0, 290.0, 310.0, 305.0]),
-            ExtractedCell(3, 0, "Line Item", "Total Borrowings (Debt)", 1850000.0, 0.99, [45.0, 310.0, 220.0, 325.0]),
-            ExtractedCell(3, 1, "FY2024", "£1,850,000", 1850000.0, 0.99, [240.0, 310.0, 310.0, 325.0]),
-            ExtractedCell(4, 0, "Line Item", "Net Assets / Shareholder Equity", 2420000.0, 0.99, [45.0, 330.0, 220.0, 345.0]),
-            ExtractedCell(4, 1, "FY2024", "£2,420,000", 2420000.0, 0.99, [240.0, 330.0, 310.0, 345.0]),
-        ]
+        try:
+            dialect = csv.Sniffer().sniff(text[:8192], delimiters=",\t;|")
+        except csv.Error:
+            dialect = csv.excel
 
-        pnl_table = ExtractedTable(
-            table_id=f"TBL-PNL-{doc_id}",
-            page_number=1,
-            table_type="PROFIT_AND_LOSS",
-            rows=5,
-            columns=2,
-            cells=pnl_cells,
-            reconciliation_status="RECONCILED_WITH_P&L"
+        try:
+            rows = list(csv.reader(io.StringIO(text, newline=""), dialect))
+        except csv.Error as error:
+            raise DocumentExtractionError(f"CSV parsing failed: {error}") from error
+        if not rows or not any(cell.strip() for cell in rows[0]):
+            raise DocumentExtractionError("CSV must include a non-empty header row.")
+        if len(rows) - 1 > MAX_ROWS:
+            raise DocumentExtractionError(f"CSV exceeds the {MAX_ROWS}-row limit.")
+        if any(len(row) > MAX_COLUMNS for row in rows):
+            raise DocumentExtractionError(f"CSV exceeds the {MAX_COLUMNS}-column limit.")
+        if any(len(cell) > MAX_CELL_CHARS for row in rows for cell in row):
+            raise DocumentExtractionError(f"CSV contains a cell larger than {MAX_CELL_CHARS} characters.")
+
+        headers = [header.strip() or f"column_{index + 1}" for index, header in enumerate(rows[0])]
+        cells: list[ExtractedCell] = []
+        for row_idx, row in enumerate(rows[1:]):
+            for col_idx, header in enumerate(headers):
+                raw_text = row[col_idx].strip() if col_idx < len(row) else ""
+                cells.append(
+                    ExtractedCell(
+                        row_idx=row_idx,
+                        col_idx=col_idx,
+                        header=header,
+                        raw_text=raw_text,
+                        normalized_value=_numeric_value(raw_text),
+                    )
+                )
+
+        document_hash = hashlib.sha256(document_bytes).hexdigest()
+        document_id = f"DOC-{uuid.uuid4()}"
+        table = ExtractedTable(
+            table_id=f"TBL-{document_id}",
+            page_number=None,
+            table_type="UNCLASSIFIED_CSV",
+            rows=len(rows) - 1,
+            columns=len(headers),
+            cells=cells,
+            reconciliation_status="NOT_EVALUATED",
         )
-
-        bs_table = ExtractedTable(
-            table_id=f"TBL-BS-{doc_id}",
-            page_number=2,
-            table_type="BALANCE_SHEET",
-            rows=5,
-            columns=2,
-            cells=bs_cells,
-            reconciliation_status="RECONCILED_WITH_BALANCE_SHEET"
-        )
-
-        # Hash of extracted payload for audit WORM ledger
-        provenance = hashlib.sha256(f"{filename}-{doc_id}-{confidence}".encode()).hexdigest()
-
         return DocumentParseResult(
-            document_id=doc_id,
-            filename=filename,
-            doc_format="PDF" if filename.endswith(".pdf") else "SCAN_IMAGE",
-            parser_engine=parser_name,
-            page_count=3,
-            overall_confidence=confidence,
-            extracted_tables=[pnl_table, bs_table],
+            document_id=document_id,
+            filename=safe_filename,
+            doc_format="CSV",
+            parser_engine="Python stdlib csv",
+            row_count=len(rows) - 1,
+            extracted_tables=[table],
             extracted_metadata={
-                "dealer_name": "Apex Motor Group Ltd",
-                "period_ending": "2024-12-31",
-                "auditor_signed": True,
-                "auditor_name": "BDO LLP UK",
-                "source_provenance_tag": f"[SRC: Docling-{filename}#p1-p2]",
+                "category": doc_category.strip(),
+                "semantic_mapping": "NOT_PERFORMED",
+                "document_verification": "NOT_PERFORMED",
             },
-            provenance_hash=provenance
+            provenance_hash=document_hash,
         )
+
+
+def result_as_dict(result: DocumentParseResult) -> dict[str, Any]:
+    return asdict(result)

@@ -1,18 +1,7 @@
-"""
-[DU-08] CreditSubmissionGatewayAgent (Autonomous Protocol Handler & Pack Compiler)
-Implements CreditSubmissionGatewayUnit:
-- AssembleDecisionReadyCreditPack (REQ-060)
-- ExecuteDeterministicCompletenessGate (Decision Table DT-2 / CALC-011 / BR-P04)
-- AuthoriseSubmissionToCredit (REQ-062 / BR-E01)
-- GenerateImmutableSnapshotAndTransmit (REQ-063 / REQ-064 / BR-P05 / SHA-256 Seal)
-- Independent Credit Assessment Interface & Rework Query Tracking (REQ-065 / REQ-066 / REQ-067 / AS-01 / BR-G01)
-- Evaluates Control Gate IBVC-01-G4
-"""
+"""Evaluate supplied completeness data without fabricating a submission."""
 
 import sys
 import os
-import hashlib
-import time
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.base_agent import BaseCreditAgent
@@ -23,16 +12,21 @@ class CreditSubmissionGatewayAgent(BaseCreditAgent):
     def __init__(self):
         super().__init__(
             name="CreditSubmissionGatewayAgent",
-            role="Autonomous Credit Submission Gateway & Completeness Gate Auditor",
+            role="Completeness Analysis (No Gateway Connector)",
             deployable_unit="DU-08 CreditSubmissionGatewayUnit",
-            autonomy=AutonomyLevel.AUTONOMOUS
+            autonomy=AutonomyLevel.SUPERVISED
         )
 
     def calculate_pack_completeness(self, checklist: List[Dict[str, Any]]) -> Dict[str, Any]:
         """CALC-011: Pack Completeness = (Completed Mandatory Items ÷ Applicable Mandatory Items) * 100"""
         applicable_mandatory = [i for i in checklist if i.get("mandatory", True)]
         if not applicable_mandatory:
-            return {"completeness_pct": 100.0, "is_100_pct": True}
+            return {
+                "completeness_pct": None,
+                "completed_count": 0,
+                "total_mandatory_count": 0,
+                "is_100_pct": False,
+            }
         completed = [i for i in applicable_mandatory if i.get("satisfied", False)]
         pct = round((len(completed) / len(applicable_mandatory)) * 100, 1)
         return {
@@ -54,6 +48,24 @@ class CreditSubmissionGatewayAgent(BaseCreditAgent):
                 "code": "DT2_CHECKLIST_GAP",
                 "reason": f"{len(missing)} mandatory evidence items missing: {', '.join(missing)}.",
                 "corrective_action": "Gather missing documents in DU-02."
+            })
+
+        if not case_state.get("customer_risk_assessment"):
+            blocking_gaps.append({
+                "code": "SCREENING_REVIEW_REQUIRED",
+                "reason": "No organization-approved screening and customer-risk workflow is configured.",
+                "corrective_action": "Complete the approved external screening and human review process.",
+            })
+
+        unresolved = [
+            finding for finding in case_state.get("screening_findings", [])
+            if finding.get("status") in {"POTENTIAL_MATCH", "CONFIRMED_MATCH"}
+        ]
+        if unresolved:
+            blocking_gaps.append({
+                "code": "SCREENING_FINDINGS_OPEN",
+                "reason": f"{len(unresolved)} case-record screening findings require human review.",
+                "corrective_action": "Use the organization's approved financial-crime workflow.",
             })
 
         if not case_state.get("verification_attested", False):
@@ -87,58 +99,38 @@ class CreditSubmissionGatewayAgent(BaseCreditAgent):
             rules_enforced=["REQ-061", "CALC-011", "DT-2", "BR-P04", "BR-U04"],
             inputs={"checklist_count": len(checklist)},
             outputs={"is_ready": is_ready, "completeness_pct": calc["completeness_pct"], "blocking_gaps": blocking_gaps},
-            details=f"Completeness Gate DT-2 Audit: {calc['completeness_pct']}% complete. Passed: {is_ready}."
+            details=f"Application checklist analysis: {calc['completeness_pct']}% complete. External submission is not configured."
         )
 
         return {
-            "is_ready_for_submission": is_ready,
-            "completeness_pct": calc["completeness_pct"] if is_ready else min(85.0, calc["completeness_pct"] * 0.85),
+            "checklist_complete": is_ready,
+            "submission_available": False,
+            "submission_status": "GATEWAY_NOT_CONFIGURED",
+            "completeness_pct": calc["completeness_pct"],
             "blocking_gaps": blocking_gaps
         }
 
-    def generate_immutable_snapshot(self, case_id: str, pack_version: str, case_state: Dict[str, Any]) -> Dict[str, Any]:
-        """Activity: GenerateImmutableSnapshotAndTransmit (REQ-063, REQ-064, BR-P05)"""
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
-        raw_seed = f"{case_id}-{pack_version}-{timestamp}-{len(str(case_state))}"
-        sha256_hash = f"sha256_{hashlib.sha256(raw_seed.encode('utf-8')).hexdigest()}"
-        queue_tx = f"TX-CR-{int(time.time()) % 1000000:06d}"
-
-        snapshot = {
-            "snapshot_id": f"SNAP-{case_id}-{pack_version}",
-            "pack_version": pack_version,
-            "submitted_at": timestamp,
-            "sha256_seal": sha256_hash,
-            "credit_queue_tx_id": queue_tx,
-            "is_sealed_worm": True,
-            "status": "QUEUED_IN_CREDIT"
-        }
-
-        self.log_activity(
-            activity_name="GenerateImmutableSnapshotAndTransmit",
-            rules_enforced=["REQ-063", "REQ-064", "BR-P05", "REQ-067", "BR-G01"],
-            inputs={"case_id": case_id, "pack_version": pack_version},
-            outputs=snapshot,
-            details=f"Pack sealed under SHA-256 {sha256_hash[:18]}... Transmitted to Underwriting queue {queue_tx}."
-        )
-        return snapshot
-
     def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        case_id = context.get("case_id", "CASE-2026-0891")
+        case_id = context.get("case_id")
         gate_eval = self.evaluate_completeness_gate(context)
-
-        snapshot = None
-        if gate_eval["is_ready_for_submission"]:
-            snapshot = self.generate_immutable_snapshot(case_id, "v1.0", context)
+        if not isinstance(case_id, str) or not case_id.strip():
+            return {
+                "status": "INVALID_INPUT",
+                "error": "A persisted case ID is required.",
+                "completeness_gate": gate_eval,
+                "snapshot": None,
+            }
 
         gate_res = ControlGateResult(
             gate_id="IBVC-01-G4",
-            passed=gate_eval["is_ready_for_submission"],
-            condition_description="Decision-ready pack satisfies 100% DT-2 completeness criteria and is sealed for Underwriting.",
+            passed=False,
+            condition_description="Submission requires an approved gateway integration and validated controls.",
             blocking_reasons=[g["reason"] for g in gate_eval["blocking_gaps"]]
         )
 
         return {
+            "status": "GATEWAY_NOT_CONFIGURED",
             "completeness_gate": gate_eval,
-            "snapshot": snapshot,
+            "snapshot": None,
             "control_gate_IBVC_01_G4": gate_res.__dict__
         }

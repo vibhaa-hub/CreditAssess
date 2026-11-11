@@ -14,6 +14,8 @@ Implements FinancialSpreadingAnalysisUnit:
 
 import sys
 import os
+import math
+from numbers import Real
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.base_agent import BaseCreditAgent
@@ -24,10 +26,14 @@ class FinancialAnalystAgent(BaseCreditAgent):
     def __init__(self):
         super().__init__(
             name="FinancialAnalystAgent",
-            role="Autonomous Financial Spreading & Credit Analytics Engine",
+            role="Deterministic Analysis of Supplied Financial Data",
             deployable_unit="DU-05 FinancialSpreadingAnalysisUnit",
-            autonomy=AutonomyLevel.AUTONOMOUS
+            autonomy=AutonomyLevel.SUPERVISED
         )
+
+    @staticmethod
+    def _valid_number(value: Any) -> bool:
+        return isinstance(value, Real) and not isinstance(value, bool) and math.isfinite(float(value))
 
     def calculate_gearing(self, total_borrowings: float, net_worth: float) -> Dict[str, Any]:
         """CALC-001: Gearing = Total Borrowings ÷ Net Worth (Returns 'not meaningful' if Net Worth <= 0)"""
@@ -54,7 +60,7 @@ class FinancialAnalystAgent(BaseCreditAgent):
     def calculate_interest_cover(self, ebit: float, interest_charge: float) -> Dict[str, Any]:
         """CALC-003: Interest Cover = EBIT ÷ Interest Charge (Returns negative ratio with flag if EBIT is negative)"""
         if interest_charge <= 0:
-            return {"value": 999.0 if ebit > 0 else 0.0, "flag": "Zero interest charge reported"}
+            return {"value": None, "flag": "Interest charge must be positive to calculate interest cover."}
         ratio = round(ebit / interest_charge, 2)
         flag = None
         if ebit < 0:
@@ -63,22 +69,24 @@ class FinancialAnalystAgent(BaseCreditAgent):
             flag = "Thin interest cover (< 2.0x covenant threshold)"
         return {"value": ratio, "flag": flag}
 
-    def calculate_net_profit_margin(self, net_profit: float, turnover: float) -> float:
+    def calculate_net_profit_margin(self, net_profit: float, turnover: float) -> float | None:
         """CALC-004: Net Profit Margin = (Net Profit ÷ Turnover) * 100"""
         if turnover <= 0:
-            return 0.0
+            return None
         return round((net_profit / turnover) * 100, 2)
 
-    def calculate_yoy_change(self, current_val: float, prior_val: float) -> float:
+    def calculate_yoy_change(self, current_val: float, prior_val: float) -> float | None:
         """CALC-005: YoY Change = ((Current Value - Prior Value) ÷ |Prior Value|) * 100"""
         if prior_val == 0:
-            return 0.0
+            return None
         return round(((current_val - prior_val) / abs(prior_val)) * 100, 2)
 
-    def calculate_stock_days(self, opening_stock: float, closing_stock: float, cost_of_sales: float) -> float:
+    def calculate_stock_days(
+        self, opening_stock: float, closing_stock: float, cost_of_sales: float
+    ) -> float | None:
         """CALC-009: Stock Days = ((Opening Stock + Closing Stock) ÷ 2 ÷ Cost of Sales) * 365"""
         if cost_of_sales <= 0:
-            return 0.0
+            return None
         avg_stock = (opening_stock + closing_stock) / 2.0
         return round((avg_stock / cost_of_sales) * 365, 1)
 
@@ -101,16 +109,43 @@ class FinancialAnalystAgent(BaseCreditAgent):
     def calculate_facility_utilization(self, drawn: float, limit: float) -> Dict[str, Any]:
         """CALC-006: Facility Utilisation = (Drawn ÷ Limit) * 100; Headroom = Limit - Drawn"""
         headroom = max(0.0, limit - drawn)
-        utilization_pct = round((drawn / limit) * 100, 1) if limit > 0 else 0.0
+        utilization_pct = round((drawn / limit) * 100, 1) if limit > 0 else None
         return {"headroom": headroom, "utilization_pct": utilization_pct}
 
     def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
         periods = context.get("financial_periods", [])
-        if not periods:
-            return {"error": "Zero financial periods provided for spreading analysis."}
+        if not isinstance(periods, list) or not periods:
+            return {
+                "status": "INCOMPLETE_INPUT",
+                "missing_fields": ["financial_periods"],
+                "analysis": None,
+            }
 
         latest_p = periods[-1]
         prior_p = periods[-2] if len(periods) >= 2 else latest_p
+        required_fields = {
+            "turnover", "costOfSales", "ebit", "interestCharge", "netProfit",
+            "totalBorrowings", "netAssets", "currentAssets", "currentLiabilities",
+            "inventory", "openingCash", "operatingCashflow", "investingCashflow",
+            "financingCashflow", "closingCash",
+        }
+        missing_fields = sorted(
+            field
+            for field in required_fields
+            if not isinstance(latest_p, dict) or field not in latest_p or not self._valid_number(latest_p[field])
+        )
+        if not isinstance(prior_p, dict):
+            missing_fields.append("prior_period")
+        else:
+            for field in ("turnover", "inventory"):
+                if field not in prior_p or not self._valid_number(prior_p[field]):
+                    missing_fields.append(f"prior_period.{field}")
+        if missing_fields:
+            return {
+                "status": "INCOMPLETE_INPUT",
+                "missing_fields": sorted(set(missing_fields)),
+                "analysis": None,
+            }
 
         # Ratio calculations
         gearing = self.calculate_gearing(latest_p.get("totalBorrowings", 0), latest_p.get("netAssets", 0))
@@ -134,12 +169,31 @@ class FinancialAnalystAgent(BaseCreditAgent):
 
         # Cross line exposures
         exposures = context.get("cross_line_exposures", [])
+        if not isinstance(exposures, list):
+            return {
+                "status": "INVALID_INPUT",
+                "missing_fields": ["cross_line_exposures must be an array"],
+                "analysis": None,
+            }
         exposure_results = []
         total_limit = 0.0
         total_drawn = 0.0
         for exp in exposures:
-            limit = exp.get("limitGBP", 0)
-            drawn = exp.get("drawnGBP", 0)
+            if not isinstance(exp, dict):
+                return {"status": "INVALID_INPUT", "missing_fields": ["invalid exposure entry"], "analysis": None}
+            limit = exp.get("limitGBP")
+            drawn = exp.get("drawnGBP")
+            if (
+                not self._valid_number(limit)
+                or not self._valid_number(drawn)
+                or limit < 0
+                or drawn < 0
+            ):
+                return {
+                    "status": "INVALID_INPUT",
+                    "missing_fields": ["each exposure requires non-negative numeric limitGBP and drawnGBP"],
+                    "analysis": None,
+                }
             total_limit += limit
             total_drawn += drawn
             calc = self.calculate_facility_utilization(drawn, limit)
@@ -154,6 +208,9 @@ class FinancialAnalystAgent(BaseCreditAgent):
         overall_exp = self.calculate_facility_utilization(total_drawn, total_limit)
 
         analytics_set = {
+            "status": "ANALYTICAL_ONLY",
+            "decision_use": "NOT_APPROVED_FOR_CREDIT_DECISIONS",
+            "source": "SUPPLIED_CASE_DATA",
             "gearing": gearing,
             "current_ratio": cr,
             "interest_cover": ic,

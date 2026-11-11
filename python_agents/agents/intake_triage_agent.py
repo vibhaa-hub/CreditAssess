@@ -1,41 +1,38 @@
-"""
-[DU-01] IntakeTriageAgent (Autonomous)
-Implements RequestIntakeAndTriageUnit activities:
-- RegisterCreditRequest (REQ-001, REQ-003, BR-G02)
-- ClassifyCaseType (REQ-002: 7 statutory request categories)
-- AssignAccountableOwner (REQ-005, BR-E01)
-- ResolveRequirementSetChecklist (DT-1, REQ-004, REQ-007, BR-P01)
-- Evaluates Control Gate IBVC-01-G1
-"""
+"""Validate user-supplied intake without inventing identities or policy rules."""
 
+import datetime
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.base_agent import BaseCreditAgent
-from models import AutonomyLevel, RequestCategory, LendingLine, ControlGateResult
+from models import AutonomyLevel, RequestCategory, LendingLine, OriginationSource, ControlGateResult
 from typing import Dict, Any, List
 
 class IntakeTriageAgent(BaseCreditAgent):
     def __init__(self):
         super().__init__(
             name="IntakeTriageAgent",
-            role="Autonomous Intake & Triage Specialist",
+            role="Intake Data Validation",
             deployable_unit="DU-01 RequestIntakeAndTriageUnit",
-            autonomy=AutonomyLevel.AUTONOMOUS
+            autonomy=AutonomyLevel.HUMAN_IN_THE_LOOP
         )
 
     def register_credit_request(self, raw_message: Dict[str, Any]) -> Dict[str, Any]:
         """Activity: RegisterCreditRequest (REQ-001, REQ-003, BR-G02)"""
-        case_id = raw_message.get("case_id", f"CASE-2026-{int(time.time()) % 10000:04d}")
-        origination_source = raw_message.get("source", "OEM_PARTNER")
-        receipt_time = raw_message.get("timestamp", time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
+        case_id = raw_message.get("case_id")
+        origination_source = raw_message.get("source")
+        if not isinstance(case_id, str) or not case_id.strip():
+            raise ValueError("A persisted case ID is required for intake analysis.")
+        if origination_source not in {source.value for source in OriginationSource}:
+            raise ValueError("A valid origination source must be supplied.")
+        receipt_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         header = {
-            "case_id": case_id,
+            "case_id": case_id.strip(),
             "origination_source": origination_source,
             "receipt_timestamp": receipt_time,
-            "channel_sender": raw_message.get("sender", "Stellantis Financial Services Referral Portal")
+            "channel_sender": raw_message.get("sender"),
         }
 
         self.log_activity(
@@ -49,13 +46,23 @@ class IntakeTriageAgent(BaseCreditAgent):
 
     def classify_case_type(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Activity: ClassifyCaseType (REQ-002: 7 statutory categories)"""
-        requested_type = payload.get("requested_category", RequestCategory.INCREASED_BORROWING.value)
-        lending_lines = payload.get("affected_lending_lines", [LendingLine.WHOLESALE.value, LendingLine.FRANCHISE.value])
+        requested_type = payload.get("requested_category")
+        valid_categories = {category.value for category in RequestCategory}
+        if requested_type not in valid_categories:
+            raise ValueError("A valid request category must be supplied.")
+        lending_lines = payload.get("affected_lending_lines")
+        valid_lines = {line.value for line in LendingLine}
+        if (
+            not isinstance(lending_lines, list)
+            or not lending_lines
+            or any(line not in valid_lines for line in lending_lines)
+        ):
+            raise ValueError("At least one valid affected lending line must be supplied.")
 
         classification = {
             "primary_category": requested_type,
             "affected_lending_lines": lending_lines,
-            "statutory_category_verified": True
+            "classification_source": "USER_SUPPLIED",
         }
 
         self.log_activity(
@@ -71,17 +78,22 @@ class IntakeTriageAgent(BaseCreditAgent):
         """Activity: AssignAccountableOwner (REQ-005, BR-E01)"""
         lines = classification.get("affected_lending_lines", [])
         if LendingLine.WHOLESALE.value in lines:
-            owner_id = roster.get("wholesale_manager", "Marcus Vance (Wholesale Manager - Central Region)")
+            owner_id = roster.get("wholesale_manager")
             owner_role = "WHOLESALE_MANAGER"
         else:
-            owner_id = roster.get("account_manager", "Sarah Jenkins (Senior Account Manager)")
+            owner_id = roster.get("account_manager")
             owner_role = "ACCOUNT_MANAGER"
+        if not isinstance(owner_id, str) or not owner_id.strip():
+            return {
+                "status": "NOT_ASSIGNED",
+                "reason": "No organization-managed owner roster is configured.",
+            }
 
         assignment = {
-            "designated_owner": owner_id,
+            "designated_owner": owner_id.strip(),
             "owner_role": owner_role,
-            "assignment_timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
-            "sole_accountability_enforced": True
+            "assignment_timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "sole_accountability_enforced": False,
         }
 
         self.log_activity(
@@ -94,32 +106,16 @@ class IntakeTriageAgent(BaseCreditAgent):
         return assignment
 
     def resolve_requirement_set_checklist(self, category: str) -> List[Dict[str, Any]]:
-        """Activity: ResolveRequirementSetChecklist (DT-1, REQ-004, REQ-007, BR-P01)"""
-        base_checklist = [
-            {"code": "REQ_LEGAL_ENTITY", "name": "Companies House Certificate of Incorporation", "category": "LEGAL", "mandatory": True},
-            {"code": "REQ_SEARCH_CONSENT", "name": "Authorized Credit Bureau Search Mandate & GDPR Notice", "category": "GOVERNANCE", "mandatory": True},
-            {"code": "REQ_DIRECTORS_UBO", "name": "Director Register, PSC Declaration & 100% UBO Identification", "category": "LEGAL", "mandatory": True},
-            {"code": "REQ_FINANCIAL_STATEMENTS", "name": "3 Years Audited Accounts & Recent Management Accounts", "category": "FINANCIAL", "mandatory": True},
-            {"code": "REQ_SANCTIONS_AML", "name": "OFSI Sanctions, PEP Screening & 2+2 ID&V Verification", "category": "DUE_DILIGENCE", "mandatory": True},
-            {"code": "REQ_FCA_REGISTER", "name": "FCA Financial Services Register Permissions Check", "category": "DUE_DILIGENCE", "mandatory": True},
-            {"code": "REQ_SECURITY_DEBENTURE", "name": "All-Monies Debenture, Stock Floating Charge & PG Schedule", "category": "SECURITY", "mandatory": True},
-        ]
-
-        if category == RequestCategory.NEW_FRANCHISE.value:
-            base_checklist.append({"code": "REQ_OEM_FRANCHISE_LETTER", "name": "Manufacturer Franchise Agreement & Territory Authorization", "category": "LEGAL", "mandatory": True})
-        elif category == RequestCategory.ACQUISITION.value:
-            base_checklist.append({"code": "REQ_ACQUISITION_SPA", "name": "Share Purchase Agreement (SPA) & Acquisition Debt Service Model", "category": "FINANCIAL", "mandatory": True})
-        elif category == RequestCategory.INCREASED_BORROWING.value:
-            base_checklist.append({"code": "REQ_FACILITY_UTILIZATION_AUDIT", "name": "12-Month Peak Stock Turn & Vehicle Facility Utilization Audit", "category": "FINANCIAL", "mandatory": True})
-
+        """No organization-approved checklist policy is configured in this service."""
         self.log_activity(
             activity_name="ResolveRequirementSetChecklist",
-            rules_enforced=["REQ-004", "REQ-007", "DT-1", "BR-P01"],
+            rules_enforced=[],
             inputs={"category": category},
-            outputs={"items_count": len(base_checklist)},
-            details=f"Evaluated Decision Table DT-1: generated itemized dynamic requirement set with {len(base_checklist)} mandatory items."
+            outputs={"status": "NOT_CONFIGURED"},
+            details="No organization-approved document checklist was generated.",
+            status="BLOCKED",
         )
-        return base_checklist
+        return []
 
     def evaluate_control_gate(self, case_state: Dict[str, Any]) -> ControlGateResult:
         """Control Gate: IBVC-01-G1 (Intake Requirement Set Confirmed)"""
@@ -139,9 +135,9 @@ class IntakeTriageAgent(BaseCreditAgent):
         return ControlGateResult(
             gate_id="IBVC-01-G1",
             passed=passed,
-            condition_description="Case type classified, accountable owner assigned, and dynamic checklist generated.",
+            condition_description="Intake fields, owner assignment, and approved checklist policy are required.",
             blocking_reasons=blocking,
-            advisory_notes=["Ready for DU-02 Evidence Ingestion."] if passed else []
+            advisory_notes=[],
         )
 
     def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -152,13 +148,12 @@ class IntakeTriageAgent(BaseCreditAgent):
         checklist = self.resolve_requirement_set_checklist(classification["primary_category"])
 
         state = {
+            "status": "READY_FOR_REVIEW" if assignment.get("designated_owner") and checklist else "INCOMPLETE",
             "header": header,
             "classification": classification,
             "assignment": assignment,
-            "requirement_checklist": checklist
+            "requirement_checklist": checklist,
         }
         gate = self.evaluate_control_gate(state)
         state["control_gate_IBVC_01_G1"] = gate.__dict__
         return state
-
-import time

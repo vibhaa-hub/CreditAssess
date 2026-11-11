@@ -1,44 +1,35 @@
-"""
-[DU-04] DueDiligenceScreeningAgent (Autonomous Screening Engine & ID&V Connector)
-Implements DueDiligenceScreeningUnit:
-- ExecuteSanctionsScreening (REQ-027, LR-03, BR-D02)
-- PerformPartyIDAndVerification (REQ-028, LR-01)
-- ExecuteKYCAndAMLChecks (REQ-025, REQ-026, LR-01)
-- RunFCARegulatoryCheck (REQ-030, LR-09)
-- ExecuteAdverseMediaSearch (REQ-031)
-- TriageAndDispositionGate (Decision Table DT-3, REQ-032, BR-P03)
-- ProduceCustomerRiskAssessment (CRA Rating: LOW, MEDIUM, HIGH per REQ-029, BR-D03)
-- Evaluates Control Gate IBVC-01-G2 / DT-3
-"""
+"""Summarize supplied due-diligence evidence without claiming live screening."""
 
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.base_agent import BaseCreditAgent
-from models import AutonomyLevel, CRARating, ControlGateResult
+from models import AutonomyLevel
 from typing import Dict, Any, List
 
 class DueDiligenceScreeningAgent(BaseCreditAgent):
     def __init__(self):
         super().__init__(
             name="DueDiligenceScreeningAgent",
-            role="Autonomous Screening Engine & Financial Crime Due Diligence Connector",
+            role="Supplied Screening Evidence Review",
             deployable_unit="DU-04 DueDiligenceScreeningUnit",
-            autonomy=AutonomyLevel.AUTONOMOUS
+            autonomy=AutonomyLevel.HUMAN_IN_THE_LOOP
         )
 
     def screen_sanctions(self, parties: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Activity: ExecuteSanctionsScreening (REQ-027, LR-03, BR-D02)"""
-        hits = []
-        for p in parties:
-            if p.get("sanctionsHit") == "CONFIRMED_HIT":
-                hits.append({"party": p.get("name"), "status": "CONFIRMED_MATCH", "list": "UK OFSI Consolidated"})
-            elif p.get("sanctionsHit") == "POTENTIAL_HIT":
-                hits.append({"party": p.get("name"), "status": "POTENTIAL_MATCH", "list": "EU Sanctions Map"})
-
-        outcome = "CLEAR" if len(hits) == 0 else "MATCH_FOUND"
-        return {"check_type": "SANCTIONS", "outcome": outcome, "hits": hits, "list_version": "2026-Q4-V12"}
+        """Report supplied case flags; never describe them as provider screening."""
+        findings = [
+            {"party": p.get("name"), "status": p.get("sanctionsHit")}
+            for p in parties
+            if p.get("sanctionsHit") not in (None, "", "NOT_CHECKED")
+        ]
+        return {
+            "check_type": "SANCTIONS",
+            "provider_status": "NOT_CONFIGURED",
+            "source": "CASE_RECORD_ONLY",
+            "case_record_findings": findings,
+        }
 
     def perform_idv(self, individuals: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Activity: PerformPartyIDAndVerification (REQ-028, LR-01)"""
@@ -46,9 +37,10 @@ class DueDiligenceScreeningAgent(BaseCreditAgent):
         total_required = len(individuals)
         return {
             "check_type": "ID_AND_V",
-            "verified_count": verified_count,
+            "provider_status": "NOT_CONFIGURED",
+            "case_record_reported_verified_count": verified_count,
             "total_required": total_required,
-            "all_verified": verified_count == total_required
+            "source": "CASE_RECORD_ONLY",
         }
 
     def evaluate_triage_gate(self, findings: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -58,9 +50,9 @@ class DueDiligenceScreeningAgent(BaseCreditAgent):
 
         if confirmed:
             return {
-                "branch": "MLRO_ESCALATION",
-                "action": "SUSPEND_CASE_AND_FREEZE",
-                "reason": f"Confirmed sanctions or severe financial crime hit detected on {len(confirmed)} parties (LR-02)."
+                "branch": "CASE_REPORTED_CONFIRMED_MATCH",
+                "action": "REQUIRES_FCC_REVIEW",
+                "reason": f"The case record contains {len(confirmed)} items marked CONFIRMED_MATCH; provider results were not verified.",
             }
         elif undispositioned:
             return {
@@ -69,9 +61,9 @@ class DueDiligenceScreeningAgent(BaseCreditAgent):
                 "reason": f"Found {len(undispositioned)} undispositioned screening matches. Reasoned disposition required (REQ-032 / BR-P03)."
             }
         return {
-            "branch": "PASS_BRANCH",
-            "action": "PROCEED_TO_CRA",
-            "reason": "All checks clear or properly dispositioned."
+            "branch": "PROVIDER_REQUIRED",
+            "action": "HOLD_FOR_CONFIGURED_SCREENING",
+            "reason": "No live sanctions, PEP, identity, or adverse-media screening provider is configured.",
         }
 
     def produce_customer_risk_assessment(
@@ -82,25 +74,10 @@ class DueDiligenceScreeningAgent(BaseCreditAgent):
         trading_years: int = 13
     ) -> Dict[str, Any]:
         """Activity: ProduceCustomerRiskAssessment (CRA) (REQ-029, BR-D03)"""
-        if not sanctions_clear:
-            rating = CRARating.HIGH.value
-            rationale = "High Risk: Counterparty or officer subject to confirmed watchlist matches."
-            cadence = "MONTHLY"
-        elif not idv_all_passed or trading_years < 2:
-            rating = CRARating.MEDIUM.value
-            rationale = "Medium Risk: Incomplete ID&V or limited operating history."
-            cadence = "QUARTERLY"
-        else:
-            rating = CRARating.LOW.value
-            rationale = f"Low Risk: Longstanding UK trading track record ({trading_years} years), clear OFSI sanctions screening, transparent 100% UBO ownership."
-            cadence = "ANNUAL"
-
-        cra_result = {
-            "cra_rating": rating,
-            "rationale": rationale,
-            "recommended_review_cadence": cadence
+        return {
+            "status": "NOT_PRODUCED",
+            "reason": "A customer risk rating requires the organization's approved policy and verified provider evidence.",
         }
-        return cra_result
 
     def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
         parties = context.get("directors_and_shareholders", [])
@@ -110,32 +87,29 @@ class DueDiligenceScreeningAgent(BaseCreditAgent):
         triage = self.evaluate_triage_gate(findings)
 
         cra = self.produce_customer_risk_assessment(
-            sanctions_clear=(sanctions["outcome"] == "CLEAR"),
-            idv_all_passed=idv["all_verified"]
-        )
-
-        is_passed = (triage["branch"] == "PASS_BRANCH") and bool(cra.get("cra_rating"))
-        gate = ControlGateResult(
-            gate_id="IBVC-01-G2",
-            passed=is_passed,
-            condition_description="Zero undispositioned hits and valid Customer Risk Assessment (CRA) recorded.",
-            blocking_reasons=[triage["reason"]] if not is_passed else []
+            sanctions_clear=False,
+            idv_all_passed=False
         )
 
         result = {
+            "status": "SCREENING_PROVIDER_NOT_CONFIGURED",
             "sanctions_outcome": sanctions,
             "idv_outcome": idv,
             "triage_gate": triage,
             "customer_risk_assessment": cra,
-            "control_gate_IBVC_01_G2": gate.__dict__
+            "control_gate_IBVC_01_G2": {
+                "gate_id": "IBVC-01-G2",
+                "passed": False,
+                "blocking_reasons": [triage["reason"]],
+            },
         }
 
         self.log_activity(
             activity_name="ExecuteFinancialCrimeScreening",
-            rules_enforced=["REQ-025..037", "LR-01..03", "BR-D02", "BR-P03", "DT-3"],
+            rules_enforced=[],
             inputs={"parties_count": len(parties)},
             outputs=result,
-            details=f"Screening complete. CRA Rating: {cra['cra_rating']} ({cra['recommended_review_cadence']}). Triage Branch: {triage['branch']}."
+            details="Summarized case-record screening fields; no external provider checks or CRA rating were performed.",
         )
 
         return result

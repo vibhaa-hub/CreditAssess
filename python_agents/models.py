@@ -30,6 +30,13 @@ class LendingLine(str, Enum):
     FLEET = "FLEET"
     RETAIL = "RETAIL"
 
+class OriginationSource(str, Enum):
+    OEM_PARTNER = "OEM_PARTNER"
+    FIELD_TEAM = "FIELD_TEAM"
+    DEALER_DIRECT = "DEALER_DIRECT"
+    BANK_REFERRAL = "BANK_REFERRAL"
+    EXISTING_RELATIONSHIP = "EXISTING_RELATIONSHIP"
+
 class CRARating(str, Enum):
     LOW = "LOW"
     MEDIUM = "MEDIUM"

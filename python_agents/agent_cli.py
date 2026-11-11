@@ -1,198 +1,103 @@
-"""
-ApexCredit Multi-Agent CLI Gateway
-Callable from Python or Node.js backend to execute multi-agent pipelines.
-"""
+"""Allowlisted JSON-lines boundary for the Python analysis workers."""
 
-import sys
-import os
+from __future__ import annotations
+
+import base64
+import binascii
 import json
+import os
+import sys
+from typing import Any
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from orchestrator import CreditMultiAgentOrchestrator
 
-def main():
-    if len(sys.argv) < 2:
-        print(json.dumps({"error": "No command specified. Usage: python agent_cli.py <command> [json_payload]"}))
-        sys.exit(1)
+AVAILABLE_COMMANDS = {
+    "list-agents",
+    "evaluate-all",
+    "docling-extract",
+}
 
-    command = sys.argv[1]
-    raw_payload = sys.argv[2] if len(sys.argv) > 2 else "{}"
 
-    try:
-        payload = json.loads(raw_payload) if raw_payload.strip() else {}
-    except Exception as e:
-        print(json.dumps({"error": f"Invalid JSON payload: {str(e)}"}))
-        sys.exit(1)
+def _read_payload() -> dict[str, Any]:
+    raw_payload = sys.stdin.read()
+    if not raw_payload.strip():
+        return {}
+    payload = json.loads(raw_payload)
+    if not isinstance(payload, dict):
+        raise ValueError("The worker payload must be a JSON object.")
+    return payload
 
-    orchestrator = CreditMultiAgentOrchestrator()
+
+def _dispatch(command: str, payload: dict[str, Any]) -> Any:
+    if command not in AVAILABLE_COMMANDS:
+        raise ValueError("This worker command is unavailable or not configured.")
 
     if command == "list-agents":
-        agents_info = [
-            {
-                "name": "IntakeTriageAgent",
-                "deployable_unit": "DU-01 RequestIntakeAndTriageUnit",
-                "autonomy": "Autonomous",
-                "activities": ["RegisterCreditRequest", "ClassifyCaseType", "AssignAccountableOwner", "ResolveRequirementSetChecklist"],
-                "rules": ["REQ-001..007", "DT-1", "BR-G02", "BR-E01"]
-            },
-            {
-                "name": "DueDiligenceScreeningAgent",
-                "deployable_unit": "DU-04 DueDiligenceScreeningUnit",
-                "autonomy": "Autonomous",
-                "activities": ["ExecuteSanctionsScreening", "PerformPartyIDAndVerification", "ExecuteKYCAndAMLChecks", "ProduceCustomerRiskAssessment"],
-                "rules": ["REQ-025..037", "DT-3", "LR-01..03", "BR-D02", "BR-P03"]
-            },
-            {
-                "name": "FinancialAnalystAgent",
-                "deployable_unit": "DU-05 FinancialSpreadingAnalysisUnit",
-                "autonomy": "Autonomous",
-                "activities": ["NormaliseFinancialStatements", "ValidateStatementReconciliation", "CalculateCreditRatios", "AggregateCrossLineBorrowingProfile"],
-                "rules": ["REQ-038..045", "CALC-001..010", "BR-D04..06"]
-            },
-            {
-                "name": "CreditSubmissionGatewayAgent",
-                "deployable_unit": "DU-08 CreditSubmissionGatewayUnit",
-                "autonomy": "Autonomous",
-                "activities": ["AssembleDecisionReadyCreditPack", "ExecuteDeterministicCompletenessGate", "GenerateImmutableSnapshotAndTransmit"],
-                "rules": ["REQ-060..067", "CALC-011", "DT-2", "BR-P04", "BR-P05"]
-            }
-        ]
-        print(json.dumps({"status": "SUCCESS", "agents": agents_info}))
-        return
+        return {
+            "status": "OK",
+            "agents": [
+                {
+                    "name": "IntakeTriageAgent",
+                    "capability": "Validate and summarize supplied intake fields.",
+                    "external_integrations": "NONE",
+                },
+                {
+                    "name": "FinancialAnalystAgent",
+                    "capability": "Calculate ratios from supplied financial periods.",
+                    "external_integrations": "NONE",
+                },
+                {
+                    "name": "DueDiligenceScreeningAgent",
+                    "capability": "Summarize supplied screening findings only.",
+                    "external_integrations": "NOT_CONFIGURED",
+                },
+                {
+                    "name": "CreditSubmissionGatewayAgent",
+                    "capability": "Evaluate supplied completeness data only.",
+                    "external_integrations": "NOT_CONFIGURED",
+                },
+            ],
+        }
 
-    elif command == "evaluate-all":
-        result = orchestrator.run_full_autonomous_evaluation(payload)
-        print(json.dumps(result))
-        return
+    if command == "evaluate-all":
+        from orchestrator import CreditMultiAgentOrchestrator
 
-    elif command == "run-intake":
-        result = orchestrator.run_intake_pipeline(payload)
-        print(json.dumps(result))
-        return
+        return CreditMultiAgentOrchestrator().run_full_autonomous_evaluation(payload)
 
-    elif command == "run-financials":
-        periods = payload.get("financial_periods", [])
-        exposures = payload.get("cross_line_exposures", [])
-        result = orchestrator.run_financial_pipeline(periods, exposures)
-        print(json.dumps(result))
-        return
+    if command == "docling-extract":
+        from doc_extractor import DoclingExtractionEngine, result_as_dict
 
-    elif command == "run-screening":
-        parties = payload.get("directors_and_shareholders", [])
-        findings = payload.get("screening_findings", [])
-        result = orchestrator.run_screening_pipeline(parties, findings)
-        print(json.dumps(result))
-        return
-
-    elif command == "run-gateway":
-        result = orchestrator.run_gateway_completeness_check(payload)
-        print(json.dumps(result))
-        return
-
-    elif command == "list-prompts":
-        import prompts
-        keys = list(prompts.PROMPT_REGISTRY.keys())
-        print(json.dumps({"status": "SUCCESS", "prompts": keys}))
-        return
-
-    elif command == "get-prompt":
-        import prompts
-        agent_key = payload.get("agent_key", "financial_analyst")
-        contract = prompts.get_prompt_contract(agent_key)
-        print(json.dumps({"status": "SUCCESS", "agent_key": agent_key, "contract": contract}))
-        return
-
-    # Google ADK Framework Commands
-    elif command == "adk-list":
-        from google_adk import GoogleADKOrchestrator
-        adk_orch = GoogleADKOrchestrator()
-        print(json.dumps({"status": "SUCCESS", "adk_agents": adk_orch.list_all_agents()}))
-        return
-
-    elif command == "adk-run":
-        from google_adk import GoogleADKOrchestrator
-        adk_orch = GoogleADKOrchestrator()
-        session_id = payload.get("session_id", "default_sess")
-        res = adk_orch.run_full_pipeline(session_id)
-        print(json.dumps(res))
-        return
-
-    elif command == "adk-hitl-signoff":
-        from google_adk import GoogleADKOrchestrator
-        adk_orch = GoogleADKOrchestrator()
-        session_id = payload.get("session_id", "default_sess")
-        cp_id = payload.get("checkpoint_id", "HITL_AM_NARRATIVE_ATTESTATION")
-        decision = payload.get("decision", "APPROVE")
-        user_id = payload.get("user_id", "Certified_Account_Manager")
-        amendments = payload.get("amendments")
-        res = adk_orch.record_hitl_signoff(session_id, cp_id, decision, user_id, amendments)
-        print(json.dumps(res))
-        return
-
-    # Deterministic Rule Engine DSL Command
-    elif command == "rule-engine-eval":
-        from rule_engine_dsl import ApexRuleEngineDSL
-        dsl = ApexRuleEngineDSL()
-        res = dsl.evaluate_case_facts(payload)
-        print(json.dumps(res))
-        return
-
-    # Docling & OCR Ingestion Command
-    elif command == "docling-extract":
-        from doc_extractor import DoclingExtractionEngine
-        doc_engine = DoclingExtractionEngine()
-        filename = payload.get("filename", "ApexMotorGroup_FY24_Accounts.pdf")
-        category = payload.get("doc_category", "FINANCIAL_ACCOUNTS")
-        res = doc_engine.extract_document(filename, category)
-        from dataclasses import asdict
-        print(json.dumps(asdict(res)))
-        return
-
-    # RAG (Retrieval-Augmented Generation) Search Command
-    elif command == "rag-search":
-        from rag_engine import ApexRAGEngine
-        rag = ApexRAGEngine()
-        query = payload.get("query", "creditworthiness and gearing")
-        top_k = payload.get("top_k", 3)
-        corpus = payload.get("corpus_filter")
-        results = rag.retrieve(query, top_k, corpus)
-        print(json.dumps({"status": "SUCCESS", "query": query, "retrieved_chunks": results}))
-        return
-
-    # Risk & Pricing Prediction Model Commands
-    elif command == "risk-model-eval":
-        from risk_pricing_model import RiskAndPricingPredictionModel, CreditScenarioInput
-        model = RiskAndPricingPredictionModel()
-        inp = CreditScenarioInput(
-            scenario_id=payload.get("scenario_id", "SCENARIO-CUSTOM-01"),
-            company_name=payload.get("company_name", "Custom Dealer Ltd"),
-            tier=payload.get("tier", "SME_COMMERCIAL"),
-            sector=payload.get("sector", "USED_CAR_SUPERMARKET"),
-            requested_amount_gbp=float(payload.get("requested_amount_gbp", 7000000.0)),
-            tenor_months=int(payload.get("tenor_months", 36)),
-            gearing_ratio=float(payload.get("gearing_ratio", 2.1)),
-            dscr_ratio=float(payload.get("dscr_ratio", 1.9)),
-            stock_turn_days=int(payload.get("stock_turn_days", 45)),
-            cra_rating=payload.get("cra_rating", "MEDIUM"),
-            has_real_estate_security=bool(payload.get("has_real_estate_security", True)),
-            director_guarantee_cap_gbp=float(payload.get("director_guarantee_cap_gbp", 1000000.0)),
+        filename = payload.get("filename")
+        encoded = payload.get("content_base64")
+        if not isinstance(filename, str) or not isinstance(encoded, str):
+            raise ValueError("A filename and base64-encoded CSV document are required.")
+        try:
+            document_bytes = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError) as error:
+            raise ValueError("The uploaded document is not valid base64.") from error
+        result = DoclingExtractionEngine().extract_document(
+            filename=filename,
+            document_bytes=document_bytes,
+            doc_category=payload.get("doc_category", "UNCLASSIFIED"),
         )
-        res = model.evaluate_scenario(inp)
-        from dataclasses import asdict
-        print(json.dumps(asdict(res)))
-        return
+        return result_as_dict(result)
 
-    elif command == "risk-model-study":
-        from risk_pricing_model import RiskAndPricingPredictionModel
-        model = RiskAndPricingPredictionModel()
-        res = model.run_comparative_seven_million_study()
-        print(json.dumps(res))
-        return
+    raise ValueError("This worker command is unavailable or not configured.")
 
-    else:
-        print(json.dumps({"error": f"Unknown command '{command}'"}))
-        sys.exit(1)
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(json.dumps({"error": "A single worker command is required."}))
+        return 2
+    try:
+        result = _dispatch(sys.argv[1], _read_payload())
+        print(json.dumps(result, allow_nan=False, separators=(",", ":")))
+        return 0
+    except Exception as error:
+        print(json.dumps({"error": str(error)}, separators=(",", ":")))
+        return 2
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

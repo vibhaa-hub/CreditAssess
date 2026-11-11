@@ -44,7 +44,7 @@ async function startServer() {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', process.env.TRUST_PROXY === 'true');
-  app.use(express.json({ limit: '2mb' }));
+  app.use(express.json({ limit: '4mb' }));
   authentication.mount(app);
 
   app.get('/healthz', async (_req: Request, res: Response) => {
@@ -186,39 +186,93 @@ async function startServer() {
   });
 
   const pythonCliPath = path.join(__dirname, 'python_agents', 'agent_cli.py');
+  const allowedPythonCommands = new Set([
+    'list-agents',
+    'evaluate-all',
+    'docling-extract',
+  ]);
 
-  // Helper to execute Python agent commands
-  const executePython = (command: string, payload: any): Promise<any> => {
+  const executePython = (command: string, payload: unknown): Promise<unknown> => {
     return new Promise((resolve, reject) => {
-      const payloadStr = JSON.stringify(payload);
+      if (!allowedPythonCommands.has(command)) {
+        reject(new Error('This Python worker command is unavailable or not configured.'));
+        return;
+      }
+      const payloadStr = JSON.stringify(payload ?? {});
+      if (Buffer.byteLength(payloadStr, 'utf8') > 3 * 1024 * 1024) {
+        reject(new Error('Python worker input exceeds the 3 MB limit.'));
+        return;
+      }
       const pythonExecutable = process.env.PYTHON_EXECUTABLE
         || (process.platform === 'win32' ? 'python' : 'python3');
-      const pyProcess = spawn(pythonExecutable, [pythonCliPath, command, payloadStr], {
+      const pyProcess = spawn(pythonExecutable, [pythonCliPath, command], {
         cwd: __dirname,
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
 
       let stdoutData = '';
       let stderrData = '';
+      let timeout: NodeJS.Timeout | undefined;
+      let timedOut = false;
+      let outputExceeded = false;
+      let settled = false;
+      const maxOutputBytes = 8 * 1024 * 1024;
+      const rejectOnce = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        reject(error);
+      };
+      const resolveOnce = (value: unknown) => {
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        resolve(value);
+      };
 
       pyProcess.stdout.on('data', (chunk) => {
+        if (Buffer.byteLength(stdoutData, 'utf8') + chunk.length > maxOutputBytes) {
+          outputExceeded = true;
+          pyProcess.kill();
+          return;
+        }
         stdoutData += chunk.toString();
       });
 
       pyProcess.stderr.on('data', (chunk) => {
-        stderrData += chunk.toString();
+        if (Buffer.byteLength(stderrData, 'utf8') < 16 * 1024) {
+          stderrData += chunk.toString().slice(0, 16 * 1024);
+        }
       });
 
+      timeout = setTimeout(() => {
+        timedOut = true;
+        pyProcess.kill();
+      }, 30_000);
+      pyProcess.once('error', (error) => {
+        rejectOnce(new Error(`Could not start the Python worker: ${error.message}`));
+      });
       pyProcess.on('close', (code) => {
+        if (timeout) clearTimeout(timeout);
+        if (timedOut)         return rejectOnce(new Error('Python worker timed out.'));
+        if (outputExceeded) return rejectOnce(new Error('Python worker output exceeded the 8 MB limit.'));
         if (code !== 0) {
-          return reject(new Error(`Python process exited with code ${code}: ${stderrData || stdoutData}`));
+          try {
+            const workerError = JSON.parse(stdoutData) as { error?: string };
+          return rejectOnce(new Error(workerError.error || 'Python worker failed.'));
+          } catch {
+          return rejectOnce(new Error(`Python worker failed${stderrData ? `: ${stderrData}` : '.'}`));
+          }
         }
         try {
           const parsed = JSON.parse(stdoutData.trim());
-          resolve(parsed);
-        } catch (err) {
-          resolve({ raw_output: stdoutData.trim(), error: 'JSON parse error', stderr: stderrData });
+        resolveOnce(parsed);
+        } catch {
+        rejectOnce(new Error('Python worker returned an invalid response.'));
         }
       });
+      pyProcess.stdin.once('error', (error) => rejectOnce(new Error(`Python worker input failed: ${error.message}`)));
+      pyProcess.stdin.end(payloadStr);
     });
   };
 
@@ -234,29 +288,45 @@ async function startServer() {
 
   // API 2: Run full orchestrated multi-agent cycle
   app.post('/api/python/agents/evaluate-all', async (req: Request, res: Response) => {
+    const caseId = req.body?.caseId;
+    if (typeof caseId !== 'string' || caseId.trim().length === 0) {
+      return res.status(400).json({ error: 'A persisted caseId is required.' });
+    }
+    const roles = authentication.actorRoles(req);
+    if (!roles.some((role) => ['ACCOUNT_MANAGER', 'WHOLESALE_MANAGER', 'OPERATIONS_ANALYST', 'GOVERNANCE_AUDITOR'].includes(role))) {
+      return res.status(403).json({ error: 'Your role is not authorized to run case analysis.' });
+    }
     try {
-      const result = await executePython('evaluate-all', req.body);
+      const persistedCase = await caseRepository.get(caseId);
+      if (!persistedCase) return res.status(404).json({ error: 'Case not found.' });
+      const result = await executePython('evaluate-all', persistedCase.caseData);
+      await caseRepository.recordAudit(
+        caseId,
+        authentication.actorId(req),
+        'READ_ONLY_AGENT_ANALYSIS',
+        'Ran case-data analysis. No external screening, approval, or submission was performed.'
+      );
       res.json(result);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+    } catch (error) {
+      console.error('Python case analysis failed:', error);
+      res.status(502).json({ error: 'Case analysis could not be completed.' });
     }
   });
 
-  // API 3: Run targeted Python agent command
-  app.post('/api/python/agents/run', async (req: Request, res: Response) => {
-    try {
-      const { command, payload } = req.body;
-      const result = await executePython(command, payload || {});
-      res.json(result);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+  app.post('/api/python/agents/run', (_req: Request, res: Response) => {
+    res.status(410).json({ error: 'Arbitrary Python worker commands have been disabled.' });
   });
 
   // API 4: View source code of any Python agent file
   app.get('/api/python/agents/code/:filename', (req: Request, res: Response) => {
     try {
+      if (!authentication.actorRoles(req).some((role) => ['GOVERNANCE_AUDITOR', 'OPERATIONS_ANALYST'].includes(role))) {
+        return res.status(403).json({ error: 'Source inspection requires an operations or governance role.' });
+      }
       const filename = path.basename(req.params.filename);
+      if (!filename.endsWith('.py') || filename.includes('..')) {
+        return res.status(400).json({ error: 'Invalid source file name.' });
+      }
       let targetPath = path.join(__dirname, 'python_agents', 'agents', filename);
       if (!fs.existsSync(targetPath)) {
         targetPath = path.join(__dirname, 'python_agents', filename);
@@ -276,83 +346,65 @@ async function startServer() {
   // ==========================================
 
   // Google ADK API 1: List all ADK Agents & Declarative Tool Schemas
-  app.get('/api/adk/agents', async (req: Request, res: Response) => {
-    try {
-      const data = await executePython('adk-list', {});
-      res.json(data);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+  app.get('/api/adk/agents', (_req: Request, res: Response) => {
+    res.status(503).json({ error: 'Persistent agent sessions are not configured.' });
   });
 
   // Google ADK API 2: Run Multi-Agent ADK Pipeline with HITL Checkpoints
-  app.post('/api/adk/run', async (req: Request, res: Response) => {
-    try {
-      const data = await executePython('adk-run', req.body || {});
-      res.json(data);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+  app.post('/api/adk/run', (_req: Request, res: Response) => {
+    res.status(503).json({ error: 'The in-memory agent workflow is disabled; no persistent session store is configured.' });
   });
 
   // Google ADK API 3: Commit Human-in-the-Loop Attestation Signoff
-  app.post('/api/adk/hitl-signoff', async (req: Request, res: Response) => {
-    try {
-      const data = await executePython('adk-hitl-signoff', req.body);
-      res.json(data);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+  app.post('/api/adk/hitl-signoff', (_req: Request, res: Response) => {
+    res.status(503).json({ error: 'Human attestations must use the authenticated, persisted case workflow.' });
   });
 
   // Deterministic Rule Engine DSL API: Evaluate Statutory Invariants
-  app.post('/api/rule-engine/evaluate', async (req: Request, res: Response) => {
-    try {
-      const data = await executePython('rule-engine-eval', req.body);
-      res.json(data);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+  app.post('/api/rule-engine/evaluate', (_req: Request, res: Response) => {
+    res.status(503).json({ error: 'No organization-approved and validated rule set is configured.' });
   });
 
-  // Docling & OCR Ingestion API: Extract Tables & Cells with Bounding Boxes
+  // Bounded CSV text/table extraction only; no document persistence or OCR.
   app.post('/api/docling/extract', async (req: Request, res: Response) => {
+    const { filename, content_base64: contentBase64, doc_category: docCategory } = req.body ?? {};
+    if (
+      typeof filename !== 'string'
+      || typeof contentBase64 !== 'string'
+      || contentBase64.length > 3 * 1024 * 1024
+      || (docCategory !== undefined && typeof docCategory !== 'string')
+    ) {
+      return res.status(400).json({ error: 'A filename and base64-encoded CSV document are required.' });
+    }
     try {
-      const data = await executePython('docling-extract', req.body);
+      const data = await executePython('docling-extract', {
+        filename,
+        content_base64: contentBase64,
+        doc_category: docCategory || 'UNCLASSIFIED',
+      });
       res.json(data);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Document extraction failed.';
+      const status = message.includes('Only CSV') || message.includes('CSV') || message.includes('uploaded document')
+        ? 422
+        : 502;
+      return res.status(status).json({ error: message });
     }
   });
 
   // RAG Search API: Retrieve Grounded Policy and Document Citations
-  app.post('/api/rag/search', async (req: Request, res: Response) => {
-    try {
-      const data = await executePython('rag-search', req.body);
-      res.json(data);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+  app.post('/api/rag/search', (_req: Request, res: Response) => {
+    res.status(503).json({ error: 'No organization-approved, versioned policy corpus is configured.' });
   });
 
   // Risk & Pricing Prediction Model API: Evaluate Custom Scenario
-  app.post('/api/risk-model/evaluate', async (req: Request, res: Response) => {
-    try {
-      const data = await executePython('risk-model-eval', req.body);
-      res.json(data);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+  app.post('/api/risk-model/evaluate', (_req: Request, res: Response) => {
+    res.status(503).json({ error: 'The sample risk model is not validated for use with real credit cases.' });
   });
 
   // Risk & Pricing Prediction Model API: Comparative £7M Loan Study
-  app.get('/api/risk-model/study', async (req: Request, res: Response) => {
-    try {
-      const data = await executePython('risk-model-study', {});
-      res.json(data);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+  app.get('/api/risk-model/study', (_req: Request, res: Response) => {
+    res.status(503).json({ error: 'The sample risk model is not validated for use with real credit cases.' });
   });
 
   // ==========================================
