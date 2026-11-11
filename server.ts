@@ -175,6 +175,26 @@ async function startServer() {
     }
   });
 
+  // Risk & Pricing Prediction Model API: Evaluate Custom Scenario
+  app.post('/api/risk-model/evaluate', async (req: Request, res: Response) => {
+    try {
+      const data = await executePython('risk-model-eval', req.body);
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Risk & Pricing Prediction Model API: Comparative £7M Loan Study
+  app.get('/api/risk-model/study', async (req: Request, res: Response) => {
+    try {
+      const data = await executePython('risk-model-study', {});
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ==========================================
   // GEMINI 3.8 FLASH LLM ASSISTANCE ENDPOINTS
   // Strictly compliant with FCA REQ-067 / BR-G01

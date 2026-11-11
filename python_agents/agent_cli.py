@@ -160,6 +160,36 @@ def main():
         print(json.dumps({"status": "SUCCESS", "query": query, "retrieved_chunks": results}))
         return
 
+    # Risk & Pricing Prediction Model Commands
+    elif command == "risk-model-eval":
+        from risk_pricing_model import RiskAndPricingPredictionModel, CreditScenarioInput
+        model = RiskAndPricingPredictionModel()
+        inp = CreditScenarioInput(
+            scenario_id=payload.get("scenario_id", "SCENARIO-CUSTOM-01"),
+            company_name=payload.get("company_name", "Custom Dealer Ltd"),
+            tier=payload.get("tier", "SME_COMMERCIAL"),
+            sector=payload.get("sector", "USED_CAR_SUPERMARKET"),
+            requested_amount_gbp=float(payload.get("requested_amount_gbp", 7000000.0)),
+            tenor_months=int(payload.get("tenor_months", 36)),
+            gearing_ratio=float(payload.get("gearing_ratio", 2.1)),
+            dscr_ratio=float(payload.get("dscr_ratio", 1.9)),
+            stock_turn_days=int(payload.get("stock_turn_days", 45)),
+            cra_rating=payload.get("cra_rating", "MEDIUM"),
+            has_real_estate_security=bool(payload.get("has_real_estate_security", True)),
+            director_guarantee_cap_gbp=float(payload.get("director_guarantee_cap_gbp", 1000000.0)),
+        )
+        res = model.evaluate_scenario(inp)
+        from dataclasses import asdict
+        print(json.dumps(asdict(res)))
+        return
+
+    elif command == "risk-model-study":
+        from risk_pricing_model import RiskAndPricingPredictionModel
+        model = RiskAndPricingPredictionModel()
+        res = model.run_comparative_seven_million_study()
+        print(json.dumps(res))
+        return
+
     else:
         print(json.dumps({"error": f"Unknown command '{command}'"}))
         sys.exit(1)
