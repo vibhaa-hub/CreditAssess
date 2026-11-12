@@ -172,7 +172,7 @@ export const DU08CreditGateway: React.FC = () => {
             name: 'Completeness Gate Decision Table',
             status: isSubmissionBlocked ? 'PENDING' : 'PASS',
             fcaCitation: 'FCA PR-01 / REQ-061',
-            description: '100% of statutory checklist items and validity checks (<90 days) must pass deterministically before authorization is enabled.',
+            description: 'Required evidence and validity checks under the bank-configured policy must pass before authorization is enabled.',
           },
           {
             code: 'BR-E02',
@@ -335,9 +335,9 @@ export const DU08CreditGateway: React.FC = () => {
               {/* Suggestion Chips */}
               <div className="flex flex-wrap gap-1.5">
                 {[
-                  'Evaluate Debenture Deed CP wording',
-                  'Suggest stock audit covenants',
-                  'Clarify 90-day intake document validity',
+                  'Summarize key evidence gaps',
+                  'Compare financial results across supplied periods',
+                  'Draft follow-up questions for the customer',
                 ].map((chip, idx) => (
                   <button
                     key={idx}
@@ -359,7 +359,7 @@ export const DU08CreditGateway: React.FC = () => {
                   type="text"
                   value={copilotQuestion}
                   onChange={(e) => setCopilotQuestion(e.target.value)}
-                  placeholder="Ask Gemini copilot (e.g. assess floorplan headroom stress)..."
+                  placeholder="Ask the copilot about the supplied case information"
                   className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-sans"
                 />
                 <button

@@ -2,11 +2,12 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * [DU-02] DealerInformationGatheringUnit (Deployable Unit 2 / P-02 | Domain: DOM-06 Evidence Management)
+ * [DU-02] BusinessInformationGatheringUnit (Deployable Unit 2 / P-02 | Domain: DOM-06 Evidence Management)
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useCreditAssessment } from '../../context/CreditAssessmentContext';
+import { isFinancialFieldEntered } from '../../utils/calculations';
 import {
   FileText,
   Users,
@@ -18,19 +19,31 @@ import {
   Send,
   AlertCircle,
   CheckCircle2,
-  Calendar,
   FileSearch,
-  ExternalLink,
   ArrowRight,
-  Sparkles,
-  X,
-  RotateCw,
 } from 'lucide-react';
+
+interface ExtractedDocument {
+  filename: string;
+  doc_format: string;
+  parser_engine: string;
+  row_count: number;
+  extracted_tables: {
+    table_id: string;
+    table_type: string;
+    rows: number;
+    columns: number;
+    cells: { row_idx: number; col_idx: number; header: string; raw_text: string; normalized_value: string | null }[];
+  }[];
+  extracted_metadata: { category: string; semantic_mapping: string; document_verification: string };
+  provenance_hash: string;
+}
 
 export const DU02InformationGathering: React.FC = () => {
   const {
     activeCase,
-    toggleChecklistItem,
+    updateDealerProfile,
+    recordRequirementEvidence,
     addInformationRequest,
     closeInformationRequest,
     addQualitativeNote,
@@ -39,32 +52,45 @@ export const DU02InformationGathering: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<'INGESTION' | 'NOTES' | 'GAP_ANALYSIS' | 'DELTA_CHASE'>('INGESTION');
   const [ingestionStream, setIngestionStream] = useState<'LEGAL' | 'DIRECTORS' | 'FINANCIAL' | 'CONSENT'>('LEGAL');
+  const [profileDraft, setProfileDraft] = useState(activeCase.dealerProfile);
 
-  // Docling & OCR Extraction modal state
-  const [isDoclingOpen, setIsDoclingOpen] = useState(false);
-  const [doclingData, setDoclingData] = useState<any>(null);
+  const [doclingData, setDoclingData] = useState<ExtractedDocument | null>(null);
   const [isDoclingLoading, setIsDoclingLoading] = useState(false);
+  const [documentError, setDocumentError] = useState<string | null>(null);
+  const [evidenceInputs, setEvidenceInputs] = useState<Record<string, { reference: string; provider: string }>>({});
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
 
-  const handleOpenDocling = async () => {
-    setIsDoclingOpen(true);
-    if (!doclingData) {
-      setIsDoclingLoading(true);
-      try {
-        const res = await fetch('/api/docling/extract', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            filename: 'ApexMotorGroup_AuditedAccounts_FY24.pdf',
-            doc_category: 'FINANCIAL_STATEMENTS',
-          }),
-        });
-        const data = await res.json();
-        setDoclingData(data);
-      } catch (err) {
-        console.error('Docling extract error:', err);
-      } finally {
-        setIsDoclingLoading(false);
+  const handleDocumentUpload = async (file?: File) => {
+    if (!file) return;
+    setDocumentError(null);
+    setDoclingData(null);
+    if (file.size > 2 * 1024 * 1024) {
+      setDocumentError('CSV documents must be 2 MB or smaller.');
+      return;
+    }
+    setIsDoclingLoading(true);
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let binary = '';
+      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
       }
+      const response = await fetch('/api/docling/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: file.name,
+          content_base64: btoa(binary),
+          doc_category: ingestionStream,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || `Document extraction failed (${response.status}).`);
+      setDoclingData(result as ExtractedDocument);
+    } catch (error) {
+      setDocumentError(error instanceof Error ? error.message : 'Document extraction failed.');
+    } finally {
+      setIsDoclingLoading(false);
     }
   };
 
@@ -74,10 +100,20 @@ export const DU02InformationGathering: React.FC = () => {
   const [newNoteType, setNewNoteType] = useState<'PHYSICAL_DEALERSHIP_VISIT' | 'MANAGEMENT_INTERVIEW' | 'TELEPHONE_CALL'>('PHYSICAL_DEALERSHIP_VISIT');
 
   // New Chase Request state
-  const [chaseCode, setChaseCode] = useState('REQ_TAX_CLEARANCE');
+  const [chaseCode, setChaseCode] = useState('');
   const [chaseDesc, setChaseDesc] = useState('');
-  const [chaseRecipient, setChaseRecipient] = useState('David Stirling (Finance Director)');
-  const [chaseDueDate, setChaseDueDate] = useState('2026-11-15');
+  const [chaseRecipient, setChaseRecipient] = useState('');
+  const [chaseDueDate, setChaseDueDate] = useState('');
+  const [closureRationales, setClosureRationales] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    setProfileDraft(activeCase.dealerProfile);
+  }, [activeCase.caseId]);
+
+  const handleSaveBusinessDetails = (event: React.FormEvent) => {
+    event.preventDefault();
+    updateDealerProfile(profileDraft);
+  };
 
   const handleCreateNote = (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,7 +125,7 @@ export const DU02InformationGathering: React.FC = () => {
     addQualitativeNote({
       visitType: newNoteType,
       content: newNoteContent,
-      keyTakeaways: takeaways.length > 0 ? takeaways : ['Operational discussion recorded with management.'],
+      keyTakeaways: takeaways,
     });
     setNewNoteContent('');
     setNewNoteTakeaways('');
@@ -97,9 +133,31 @@ export const DU02InformationGathering: React.FC = () => {
 
   const handleCreateChase = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chaseDesc.trim()) return;
+    if (!chaseCode.trim() || !chaseDesc.trim() || !chaseRecipient.trim() || !chaseDueDate) return;
     addInformationRequest(chaseCode, chaseDesc, chaseRecipient, chaseDueDate);
     setChaseDesc('');
+  };
+
+  const handleCloseInformationRequest = (requestId: string) => {
+    const rationale = closureRationales[requestId]?.trim();
+    if (!rationale) return;
+    closeInformationRequest(requestId, rationale);
+    setClosureRationales((current) => ({ ...current, [requestId]: '' }));
+  };
+
+  const handleRecordEvidence = (event: React.FormEvent, itemId: string) => {
+    event.preventDefault();
+    const entry = evidenceInputs[itemId];
+    if (!entry?.reference.trim() || !entry.provider.trim()) {
+      setEvidenceError('Enter both a bank document reference and the source/provider.');
+      return;
+    }
+    try {
+      recordRequirementEvidence(itemId, entry.reference, entry.provider);
+      setEvidenceError(null);
+    } catch (error) {
+      setEvidenceError(error instanceof Error ? error.message : 'Could not record evidence.');
+    }
   };
 
   return (
@@ -111,11 +169,11 @@ export const DU02InformationGathering: React.FC = () => {
             <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-blue-900/60 text-cyan-300 border border-blue-800">
               [DU-02] P-02
             </span>
-            <h1 className="text-xl font-bold text-white">Dealer Information Gathering Unit</h1>
+            <h1 className="text-xl font-bold text-white">Business Information Gathering Unit</h1>
             <span className="text-xs text-slate-400 font-mono">Domain: DOM-06 Evidence Management</span>
           </div>
           <p className="text-xs text-slate-400">
-            Multi-format OCR/tabular ingestion, provenance auditing (REQ-015), qualitative dealer interview logging (REQ-017), and delta chase orchestration (REQ-018).
+            Customer-supplied case information, CSV extraction, evidence-gap tracking, and staff-recorded qualitative notes.
           </p>
         </div>
 
@@ -128,7 +186,7 @@ export const DU02InformationGathering: React.FC = () => {
             }`}
           >
             <FileText className="w-3.5 h-3.5" />
-            <span>Multi-Format Ingestion</span>
+            <span>Evidence & CSV Upload</span>
           </button>
           <button
             onClick={() => setActiveTab('NOTES')}
@@ -160,7 +218,7 @@ export const DU02InformationGathering: React.FC = () => {
         </div>
       </div>
 
-      {/* Tab 1: Multi-Format Ingestion */}
+      {/* Tab 1: Evidence and CSV Upload */}
       {activeTab === 'INGESTION' && (
         <div className="space-y-6">
           {/* Fan-Out Selector */}
@@ -187,7 +245,7 @@ export const DU02InformationGathering: React.FC = () => {
                     <span className="text-[10px] font-mono text-cyan-400">{rule}</span>
                   </div>
                   <div className="text-xs font-bold text-white">{label}</div>
-                  <span className="text-[10px] text-emerald-400 font-medium">✓ Autonomous Ingest Active</span>
+                  <span className="text-[10px] text-slate-400 font-medium">Customer evidence and staff entry</span>
                 </button>
               );
             })}
@@ -200,38 +258,58 @@ export const DU02InformationGathering: React.FC = () => {
                 <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                   <div>
                     <h2 className="text-sm font-bold text-white">IngestLegalEntityData (REQ-008 / REQ-014)</h2>
-                    <p className="text-xs text-slate-400">Extracted and normalized attributes from uploaded certificate and portal feed.</p>
+                    <p className="text-xs text-slate-400">Customer-supplied entity information; confirm it against approved evidence and registry sources.</p>
                   </div>
-                  <span className="text-xs font-mono bg-cyan-950 text-cyan-300 border border-cyan-800 px-2 py-0.5 rounded">
-                    Format: Multi-page PDF OCR
+                  <span className="text-xs font-mono bg-amber-950 text-amber-300 border border-amber-800 px-2 py-0.5 rounded">
+                  Customer-supplied · verification required
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
-                  <div className="bg-slate-800/60 p-3 rounded-lg border border-slate-700/60">
-                    <span className="text-slate-400 block text-[11px]">Registered Legal Name</span>
-                    <span className="font-semibold text-white text-sm">{activeCase.dealerProfile.legalName}</span>
+                <form onSubmit={handleSaveBusinessDetails} className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+                  {([
+                    ['legalName', 'Registered legal name', 'text', true],
+                    ['registeredNumber', 'Company / business registration number', 'text', true],
+                    ['legalForm', 'Legal form', 'text', false],
+                    ['registeredAddress', 'Registered address', 'text', false],
+                    ['tradingName', 'Trading name', 'text', false],
+                    ['contactEmail', 'Business contact email', 'email', false],
+                    ['phone', 'Business contact phone', 'tel', false],
+                    ['fcaNumber', 'Regulatory reference (if applicable)', 'text', false],
+                  ] as const).map(([field, label, type, required]) => (
+                    <label key={field} className="text-[11px] text-slate-400">
+                      {label}
+                      <input
+                        type={type}
+                        required={required}
+                        maxLength={300}
+                        value={profileDraft[field]}
+                        onChange={(event) => setProfileDraft((current) => ({ ...current, [field]: event.target.value }))}
+                        className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 p-2 text-xs text-white"
+                      />
+                    </label>
+                  ))}
+                  <label className="text-[11px] text-slate-400 md:col-span-2 lg:col-span-3">
+                    Business locations (one per line)
+                    <textarea
+                      rows={2}
+                      value={profileDraft.locations.join('\n')}
+                      onChange={(event) => setProfileDraft((current) => ({
+                        ...current,
+                        locations: event.target.value.split('\n').map((location) => location.trim()).filter(Boolean),
+                      }))}
+                      className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 p-2 text-xs text-white"
+                    />
+                  </label>
+                  <div className="flex flex-wrap items-center gap-3 md:col-span-2 lg:col-span-3">
+                    <button type="submit" className="rounded-lg bg-cyan-700 px-3 py-2 text-xs font-semibold text-white">
+                      Save business details
+                    </button>
+                    <span className="text-[10px] text-amber-300">Customer-supplied values; external registry verification is not configured.</span>
                   </div>
-                  <div className="bg-slate-800/60 p-3 rounded-lg border border-slate-700/60">
-                    <span className="text-slate-400 block text-[11px]">Registered Company Number</span>
-                    <span className="font-mono font-semibold text-cyan-300 text-sm">{activeCase.dealerProfile.registeredNumber}</span>
-                  </div>
-                  <div className="bg-slate-800/60 p-3 rounded-lg border border-slate-700/60">
-                    <span className="text-slate-400 block text-[11px]">Legal Entity Form</span>
-                    <span className="font-semibold text-white text-sm">{activeCase.dealerProfile.legalForm}</span>
-                  </div>
-                  <div className="bg-slate-800/60 p-3 rounded-lg border border-slate-700/60 md:col-span-2">
-                    <span className="text-slate-400 block text-[11px]">Registered Office Address</span>
-                    <span className="font-semibold text-white">{activeCase.dealerProfile.registeredAddress}</span>
-                  </div>
-                  <div className="bg-slate-800/60 p-3 rounded-lg border border-slate-700/60">
-                    <span className="text-slate-400 block text-[11px]">Trading Name(s)</span>
-                    <span className="font-semibold text-white">{activeCase.dealerProfile.tradingName}</span>
-                  </div>
-                </div>
+                </form>
 
                 <div className="p-3 bg-slate-950/60 rounded-lg border border-slate-800 flex items-center justify-between text-xs">
-                  <span className="text-slate-400">Operating Dealership Premises:</span>
+                  <span className="text-slate-400">Business Locations:</span>
                   <div className="flex gap-2">
                     {activeCase.dealerProfile.locations.map((loc, i) => (
                       <span key={i} className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded text-[11px] border border-slate-700">
@@ -248,10 +326,10 @@ export const DU02InformationGathering: React.FC = () => {
                 <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                   <div>
                     <h2 className="text-sm font-bold text-white">IngestDirectorAndShareholderData (REQ-009, REQ-010, LR-01)</h2>
-                    <p className="text-xs text-slate-400">Parsed natural and corporate persons with equity percentage and UBO status.</p>
+                    <p className="text-xs text-slate-400">Enter directors, shareholders, and ownership details from customer-supplied evidence.</p>
                   </div>
-                  <span className="text-xs font-mono bg-cyan-950 text-cyan-300 border border-cyan-800 px-2 py-0.5 rounded">
-                    MLR 2017 Compliant
+                  <span className="text-xs font-mono bg-amber-950 text-amber-300 border border-amber-800 px-2 py-0.5 rounded">
+                    Review required
                   </span>
                 </div>
 
@@ -307,47 +385,88 @@ export const DU02InformationGathering: React.FC = () => {
                 <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                   <div>
                     <h2 className="text-sm font-bold text-white">IngestFinancialStatements (REQ-011 / REQ-083)</h2>
-                    <p className="text-xs text-slate-400">Tabular parser ingested multi-period audited accounts and monthly management information.</p>
+                    <p className="text-xs text-slate-400">Upload a UTF-8 CSV for source-preserving extraction, or enter figures in DU-05. Parsed rows are not verified or mapped automatically.</p>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={handleOpenDocling}
-                      className="px-2.5 py-1 bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-700/60 text-indigo-300 text-xs font-semibold rounded-lg flex items-center space-x-1.5 transition-colors shadow-sm"
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                      <span>Inspect Docling / OCR Table Extraction</span>
-                    </button>
-                    <span className="text-xs font-mono bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded">
-                      3 Periods Ingested
-                    </span>
-                  </div>
+                </div>
+
+                <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-950/60 p-4">
+                  <label className="block text-xs font-semibold text-slate-200">
+                    Upload a customer CSV document
+                    <input
+                      type="file"
+                      accept=".csv,text/csv"
+                      onChange={(event) => handleDocumentUpload(event.target.files?.[0])}
+                      disabled={isDoclingLoading}
+                      className="mt-2 block w-full text-xs text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-2 file:text-white"
+                    />
+                  </label>
+                  <p className="text-[11px] text-amber-300">
+                    CSV extraction only (2 MB maximum). The original file is processed in memory and is not retained.
+                    PDF, Excel, scanned images, and iXBRL require an approved document-storage/parser integration.
+                  </p>
+                  {isDoclingLoading && <p role="status" className="text-xs text-cyan-300">Extracting rows from the uploaded CSV…</p>}
+                  {documentError && <p role="alert" className="text-xs text-rose-300">{documentError}</p>}
+                  {doclingData && (
+                    <div className="space-y-3 text-xs">
+                      <div className="flex flex-wrap justify-between gap-2 text-slate-300">
+                        <span>{doclingData.filename} · {doclingData.row_count} rows · {doclingData.parser_engine}</span>
+                        <span className="font-mono text-slate-400">SHA-256 {doclingData.provenance_hash}</span>
+                      </div>
+                      <p className="text-amber-300">
+                        Extraction only — meaning, accounting period, and document authenticity are not verified.
+                        Review the source and enter confirmed values in DU-05.
+                      </p>
+                      {doclingData.extracted_tables.map((table) => (
+                        <div key={table.table_id} className="overflow-x-auto rounded-lg border border-slate-700">
+                          <table className="w-full text-left">
+                            <thead className="bg-slate-800 text-slate-300">
+                              <tr>{Array.from({ length: table.columns }, (_, column) => (
+                                <th key={column} className="px-3 py-2">{table.cells.find((cell) => cell.col_idx === column)?.header ?? `Column ${column + 1}`}</th>
+                              ))}</tr>
+                            </thead>
+                            <tbody>
+                              {Array.from({ length: table.rows }, (_, row) => (
+                                <tr key={row} className="border-t border-slate-800">
+                                  {Array.from({ length: table.columns }, (_, column) => (
+                                    <td key={column} className="px-3 py-2 text-slate-200">
+                                      {table.cells.find((cell) => cell.row_idx === row && cell.col_idx === column)?.raw_text ?? ''}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {activeCase.financialPeriods.map((period, idx) => (
                     <div key={idx} className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/60 space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-white text-xs">{period.periodLabel}</span>
+                        <span className="font-bold text-white text-xs">{period.periodLabel || `Period ${idx + 1}`}</span>
                         <span className="text-[10px] font-mono bg-blue-950 text-blue-300 px-1.5 py-0.2 rounded border border-blue-800">
-                          {period.isAudited ? 'Audited' : 'Management Info'}
+                          {period.isAudited ? 'Customer marked audited' : 'Customer marked MI'}
                         </span>
                       </div>
                       <div className="text-xs space-y-1 text-slate-300">
                         <div className="flex justify-between">
                           <span className="text-slate-400">Turnover:</span>
-                          <span className="font-semibold text-white">£{(period.turnover / 1000000).toFixed(2)}M</span>
+                          <span className="font-semibold text-white">{isFinancialFieldEntered(period, 'turnover') ? `£${(period.turnover / 1000000).toFixed(2)}M` : 'Not entered'}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-400">Operating Profit (EBIT):</span>
-                          <span className="font-semibold text-emerald-300">£{(period.ebit / 1000).toFixed(0)}k</span>
+                          <span className="font-semibold text-emerald-300">{isFinancialFieldEntered(period, 'ebit') ? `£${(period.ebit / 1000).toFixed(0)}k` : 'Not calculated'}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-400">Net Assets (Equity):</span>
-                          <span className="font-semibold text-cyan-300">£{(period.netAssets / 1000000).toFixed(2)}M</span>
+                          <span className="font-semibold text-cyan-300">{isFinancialFieldEntered(period, 'netAssets') ? `£${(period.netAssets / 1000000).toFixed(2)}M` : 'Not calculated'}</span>
                         </div>
                       </div>
                       <div className="pt-2 border-t border-slate-700 text-[10px] text-slate-400 italic">
-                        Cell lineage: Audited Accounts PDF Page 18-24
+                        Source: {period.enteredFields?.length ? 'Values entered in this case' : 'No source figures recorded'}
                       </div>
                     </div>
                   ))}
@@ -372,23 +491,23 @@ export const DU02InformationGathering: React.FC = () => {
                     <h2 className="text-sm font-bold text-white">IngestConsentAndDataProtectionDocs (REQ-012, REQ-013, LR-04)</h2>
                     <p className="text-xs text-slate-400">Lawful basis documentation under UK GDPR and Credit Bureau search mandates.</p>
                   </div>
-                  <span className="text-xs font-mono bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded">
-                    GDPR Mandate Executed
+                  <span className="text-xs font-mono bg-amber-950 text-amber-300 border border-amber-800 px-2 py-0.5 rounded">
+                    Consent evidence not recorded
                   </span>
                 </div>
 
                 <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800 space-y-3 text-xs">
                   <div className="flex items-center justify-between">
                     <span className="font-semibold text-white">Electronic Search Authority & Consent Mandate</span>
-                    <span className="text-emerald-400 font-bold">✓ Executed via DocuSign</span>
+                    <span className="text-amber-300 font-bold">Awaiting customer evidence</span>
                   </div>
                   <p className="text-slate-300 text-[11px] leading-relaxed">
-                    Signed by Managing Director Arthur Pendelton authorizing external credit bureau inquiries with Equifax and Experian on legal entity and associated directors. Recorded timestamp: 2026-10-16 11:22:10 UTC.
+                    Record the customer&apos;s consent, purpose, scope, and evidence reference before any external search.
+                    No consent provider or external search integration is configured.
                   </p>
                   <div className="flex gap-4 text-[11px] text-slate-400 pt-2 border-t border-slate-800">
-                    <span>Signatory: Arthur Pendelton</span>
-                    <span>Lawful Basis: Contractual Necessity & Statutory Compliance (LR-04)</span>
-                    <span>Validity: 365 Days</span>
+                    <span>Signatory: Not supplied</span>
+                    <span>Evidence reference: Not recorded</span>
                   </div>
                 </div>
               </div>
@@ -397,7 +516,7 @@ export const DU02InformationGathering: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 2: Qualitative Dealer Notes (REQ-017) */}
+      {/* Tab 2: Qualitative Business Notes (REQ-017) */}
       {activeTab === 'NOTES' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Note Form */}
@@ -414,7 +533,7 @@ export const DU02InformationGathering: React.FC = () => {
                   onChange={(e) => setNewNoteType(e.target.value as any)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white focus:outline-none"
                 >
-                  <option value="PHYSICAL_DEALERSHIP_VISIT">Physical Dealership Site Visit</option>
+                  <option value="PHYSICAL_DEALERSHIP_VISIT">Business Site Visit</option>
                   <option value="MANAGEMENT_INTERVIEW">Management Interview / Review</option>
                   <option value="TELEPHONE_CALL">Telephone / Video Call</option>
                 </select>
@@ -437,7 +556,7 @@ export const DU02InformationGathering: React.FC = () => {
                   rows={2}
                   value={newNoteTakeaways}
                   onChange={(e) => setNewNoteTakeaways(e.target.value)}
-                  placeholder="Strong showroom footfall&#10;Stock turnaround within 45 days"
+                  placeholder="Enter observations supported by the customer discussion or site visit"
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white focus:outline-none"
                 />
               </div>
@@ -542,18 +661,45 @@ export const DU02InformationGathering: React.FC = () => {
                       </span>
                     </td>
                     <td className="py-2.5 px-3 text-right">
-                      <button
-                        onClick={() => toggleChecklistItem(item.id)}
-                        className="text-[11px] px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition-colors"
-                      >
-                        Toggle Status
-                      </button>
+                      <form onSubmit={(event) => handleRecordEvidence(event, item.id)} className="min-w-52 space-y-1.5">
+                        <input
+                          required
+                          maxLength={500}
+                          value={evidenceInputs[item.id]?.reference ?? item.provenanceSource ?? ''}
+                          onChange={(event) => setEvidenceInputs((current) => ({
+                            ...current,
+                            [item.id]: { ...current[item.id], reference: event.target.value, provider: current[item.id]?.provider ?? item.provider ?? '' },
+                          }))}
+                          placeholder="Bank document reference"
+                          aria-label={`Evidence reference for ${item.name}`}
+                          className="w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-[10px] text-white"
+                        />
+                        <input
+                          required
+                          maxLength={300}
+                          value={evidenceInputs[item.id]?.provider ?? item.provider ?? ''}
+                          onChange={(event) => setEvidenceInputs((current) => ({
+                            ...current,
+                            [item.id]: { ...current[item.id], provider: event.target.value, reference: current[item.id]?.reference ?? item.provenanceSource ?? '' },
+                          }))}
+                          placeholder="Source / provider"
+                          aria-label={`Source/provider for ${item.name}`}
+                          className="w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-[10px] text-white"
+                        />
+                        <button type="submit" className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-[10px] font-semibold text-cyan-300">
+                          Record evidence reference
+                        </button>
+                      </form>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          <p className="text-[11px] text-amber-300">
+            Recording a reference does not upload, retain, or verify the source document. Use the bank&apos;s approved document repository.
+          </p>
+          {evidenceError && <p role="alert" className="text-xs text-rose-300">{evidenceError}</p>}
         </div>
       )}
 
@@ -571,6 +717,7 @@ export const DU02InformationGathering: React.FC = () => {
                 <label className="text-slate-400 block mb-1">Requirement Code</label>
                 <input
                   type="text"
+                  required
                   value={chaseCode}
                   onChange={(e) => setChaseCode(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white font-mono"
@@ -578,9 +725,10 @@ export const DU02InformationGathering: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-slate-400 block mb-1">Recipient (Dealer Contact)</label>
+                <label className="text-slate-400 block mb-1">Recipient (Business Contact)</label>
                 <input
                   type="text"
+                  required
                   value={chaseRecipient}
                   onChange={(e) => setChaseRecipient(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white"
@@ -591,6 +739,7 @@ export const DU02InformationGathering: React.FC = () => {
                 <label className="text-slate-400 block mb-1">Target Due Date (BR-P12)</label>
                 <input
                   type="date"
+                  required
                   value={chaseDueDate}
                   onChange={(e) => setChaseDueDate(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white"
@@ -600,10 +749,11 @@ export const DU02InformationGathering: React.FC = () => {
               <div>
                 <label className="text-slate-400 block mb-1">Chase Communication Description</label>
                 <textarea
+                  required
                   rows={3}
                   value={chaseDesc}
                   onChange={(e) => setChaseDesc(e.target.value)}
-                  placeholder="Please supply copy of latest VAT quarterly return or landlord lease..."
+                  placeholder="Describe the information or document requested from the business"
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white focus:outline-none"
                 />
               </div>
@@ -613,7 +763,7 @@ export const DU02InformationGathering: React.FC = () => {
                 className="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5"
               >
                 <Send className="w-3.5 h-3.5" />
-                <span>Dispatch Dealer Request</span>
+                <span>Send Business Information Request</span>
               </button>
             </form>
           </div>
@@ -654,14 +804,27 @@ export const DU02InformationGathering: React.FC = () => {
                       <span>Due: {req.dueDate}</span>
                     </div>
                     {req.status !== 'RECEIVED' && req.status !== 'CLOSED_WITH_RATIONALE' && (
-                      <button
-                        onClick={() =>
-                          closeInformationRequest(req.id, 'Information satisfied via existing held vault data (BR-E06)')
-                        }
-                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded border border-slate-700 text-[10px] font-semibold"
-                      >
-                        Close with Rationale (BR-P12)
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <input
+                          required
+                          maxLength={1000}
+                          value={closureRationales[req.id] ?? ''}
+                          onChange={(event) => setClosureRationales((current) => ({
+                            ...current,
+                            [req.id]: event.target.value,
+                          }))}
+                          placeholder="Enter closure rationale"
+                          aria-label={`Closure rationale for ${req.itemCode}`}
+                          className="rounded border border-slate-700 bg-slate-950 px-2 py-1 text-[10px] text-white"
+                        />
+                        <button
+                          onClick={() => handleCloseInformationRequest(req.id)}
+                          disabled={!closureRationales[req.id]?.trim()}
+                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded border border-slate-700 text-[10px] font-semibold disabled:opacity-40"
+                        >
+                          Close with rationale
+                        </button>
+                      </div>
                     )}
                   </div>
                   {req.closureRationale && (
@@ -676,84 +839,6 @@ export const DU02InformationGathering: React.FC = () => {
         </div>
       )}
 
-      {/* Docling Table & OCR Extraction Modal */}
-      {isDoclingOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-indigo-500/40 rounded-2xl max-w-4xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
-            <div className="px-6 py-4 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="p-2 rounded-lg bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-                  <Sparkles className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-white">Docling Table-Structure Recovery & OCR Parser</h3>
-                  <p className="text-xs text-slate-400">
-                    Source: <span className="font-mono text-slate-200">ApexMotorGroup_AuditedAccounts_FY24.pdf</span>
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsDoclingOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 overflow-y-auto flex-1 space-y-4">
-              {isDoclingLoading ? (
-                <div className="py-16 text-center space-y-3">
-                  <RotateCw className="w-8 h-8 text-indigo-400 animate-spin mx-auto" />
-                  <p className="text-sm text-slate-200">Reconstructing table bounding boxes and OCR confidence...</p>
-                </div>
-              ) : doclingData ? (
-                <div className="space-y-4 text-xs">
-                  <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between">
-                    <span>Engine: <strong className="text-indigo-300 font-mono">{doclingData.parser_engine}</strong></span>
-                    <span>Confidence: <strong className="text-emerald-300 font-mono">{(doclingData.overall_confidence * 100).toFixed(1)}%</strong></span>
-                    <span className="font-mono text-purple-300 text-[10px]">SHA-256: {doclingData.provenance_hash?.substring(0, 16)}...</span>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {doclingData.extracted_tables?.map((tbl: any, idx: number) => (
-                      <div key={idx} className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
-                        <div className="p-3 bg-slate-900 border-b border-slate-800 font-bold text-white font-mono flex justify-between">
-                          <span>{tbl.table_type}</span>
-                          <span className="text-[10px] text-emerald-400">Page {tbl.page_number}</span>
-                        </div>
-                        <div className="p-3 space-y-2">
-                          {tbl.cells?.map((c: any, i: number) => (
-                            <div key={i} className="flex justify-between p-2 rounded bg-slate-900/60 text-[11px] border border-slate-800">
-                              <span className="text-slate-300">{c.raw_text}</span>
-                              <div className="flex items-center space-x-2">
-                                <span className="font-mono text-cyan-300 font-bold">
-                                  £{(c.normalized_value / 1000).toLocaleString()}k
-                                </span>
-                                <span className="text-[9px] font-mono text-slate-500">
-                                  bbox: [{c.bbox?.slice(0, 2).join(',')}]
-                                </span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="px-6 py-3 bg-slate-950/80 border-t border-slate-800 flex justify-end">
-              <button
-                onClick={() => setIsDoclingOpen(false)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold"
-              >
-                Close Inspector
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

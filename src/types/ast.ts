@@ -169,6 +169,7 @@ export interface PeriodFinancials {
   periodEndDate: string;
   isAudited: boolean;
   currency: string;
+  enteredFields?: string[];
   // P&L
   turnover: number;
   costOfSales: number;

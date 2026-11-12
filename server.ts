@@ -397,14 +397,9 @@ async function startServer() {
     res.status(503).json({ error: 'No organization-approved, versioned policy corpus is configured.' });
   });
 
-  // Risk & Pricing Prediction Model API: Evaluate Custom Scenario
+  // Risk model endpoint remains disabled until a bank-approved model and policy set are configured.
   app.post('/api/risk-model/evaluate', (_req: Request, res: Response) => {
-    res.status(503).json({ error: 'The sample risk model is not validated for use with real credit cases.' });
-  });
-
-  // Risk & Pricing Prediction Model API: Comparative £7M Loan Study
-  app.get('/api/risk-model/study', (_req: Request, res: Response) => {
-    res.status(503).json({ error: 'The sample risk model is not validated for use with real credit cases.' });
+    res.status(503).json({ error: 'No bank-approved risk model is configured.' });
   });
 
   // ==========================================
@@ -419,18 +414,18 @@ async function startServer() {
       return res.status(503).json({ error: 'Narrative drafting is unavailable until Gemini is configured.' });
     }
 
-    const systemPrompt = `You are a drafting assistant for UK commercial credit case notes.
+    const systemPrompt = `You are a drafting assistant for SME and business credit case notes.
     Use only the supplied context. Do not claim to have checked Companies House, a bureau, sanctions sources, or documents unless that evidence is explicitly included in the context.
     Never invent figures, source references, approvals, or regulatory conclusions. If evidence for a statement is absent, mark it as requiring verification.
     All output is an unverified draft; do not make a credit decision.`;
 
-    const userPrompt = `Draft the credit pack commentary for section "${sectionTitle}" (${sectionKey}) regarding dealer "${dealerName}" (${sector}).
+    const userPrompt = `Draft the credit pack commentary for section "${sectionTitle}" (${sectionKey}) regarding business "${dealerName}" (${sector}).
 Context information provided:
 ${JSON.stringify(contextData, null, 2)}
 
 Requirements:
 - Paragraph 1: Executive overview and trading posture using only supported facts.
-- Paragraph 2: Operational strengths and asset quality.
+- Paragraph 2: Supported operational strengths and business resources.
 - Paragraph 3: Risk considerations, mitigants, and recommended covenants.
 - Keep output concise (under 250 words), direct, and identify any unsupported facts as requiring verification.
 Do not use source labels unless the exact source reference is present in the supplied context.`;
@@ -499,20 +494,20 @@ Provide a structured assessment covering:
 
   // Gemini API 3: Synthesize Financial Spreading Commentary
   app.post('/api/gemini/financial-commentary', async (req: Request, res: Response) => {
-    const { dealerName, ratios, spreadPeriods, requestedLimit } = req.body;
+    const { businessName, ratios, spreadPeriods, requestedLimit } = req.body;
     if (!process.env.GEMINI_API_KEY) {
       return res.status(503).json({ error: 'Financial commentary is unavailable until Gemini is configured.' });
     }
 
-    const prompt = `Analyze commercial financials for "${dealerName}" applying CALC-001 through CALC-014:
+    const prompt = `Analyze the supplied commercial financials for business "${businessName}" using only supported calculations:
 Financial Spreading Data:
 ${JSON.stringify({ ratios, spreadPeriods, requestedLimit }, null, 2)}
 
 Provide a rigorous financial assessment:
-1. Profitability & EBITDA trajectory (FY2022 -> FY2024).
-2. Leverage & Gearing analysis (Net Debt / EBITDA, Debt Service Coverage Ratio CALC-003).
-3. Working Capital & Liquidity (Quick Ratio CALC-002, Debtor Days CALC-008, Stock Turn CALC-007).
-4. Facility headroom stress-test against proposed £${(requestedLimit || 0).toLocaleString()} facility.
+1. Profitability trends across the periods actually supplied; do not assume period labels or missing figures.
+2. Leverage and interest coverage using the supplied values.
+3. Working capital and liquidity using available inputs.
+4. Compare facility exposure only if the requested amount and supporting inputs were supplied.
 Use only supplied values. Do not invent source references or claim external verification. Mark unsupported conclusions as requiring human review.`;
 
     try {

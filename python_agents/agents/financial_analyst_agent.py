@@ -42,9 +42,7 @@ class FinancialAnalystAgent(BaseCreditAgent):
                 "value": "not meaningful",
                 "flag": "Negative or zero Net Worth: Gearing is not meaningful under Credit Policy BR-D05"
             }
-        ratio = round(total_borrowings / net_worth, 2)
-        flag = "High Enterprise Leverage (> 2.5x)" if ratio > 2.5 else None
-        return {"value": ratio, "flag": flag}
+        return {"value": round(total_borrowings / net_worth, 2), "flag": None}
 
     def calculate_current_ratio(self, current_assets: float, current_liabilities: float) -> Dict[str, Any]:
         """CALC-002: Current Ratio = Current Assets ÷ Current Liabilities (Returns 'not calculable' if CL = 0)"""
@@ -53,9 +51,7 @@ class FinancialAnalystAgent(BaseCreditAgent):
                 "value": "not calculable",
                 "commentary": "Zero current liabilities reported; short-term coverage is not calculable."
             }
-        ratio = round(current_assets / current_liabilities, 2)
-        commentary = "Sound liquidity" if ratio >= 1.2 else "Working capital deficit" if ratio < 1.0 else "Tight buffer"
-        return {"value": ratio, "commentary": commentary}
+        return {"value": round(current_assets / current_liabilities, 2), "commentary": None}
 
     def calculate_interest_cover(self, ebit: float, interest_charge: float) -> Dict[str, Any]:
         """CALC-003: Interest Cover = EBIT ÷ Interest Charge (Returns negative ratio with flag if EBIT is negative)"""
@@ -64,9 +60,7 @@ class FinancialAnalystAgent(BaseCreditAgent):
         ratio = round(ebit / interest_charge, 2)
         flag = None
         if ebit < 0:
-            flag = "Operating Loss (EBIT < 0): Dealer failing to service commercial debt from core operations."
-        elif ratio < 2.0:
-            flag = "Thin interest cover (< 2.0x covenant threshold)"
+            flag = "Operating loss reported; human review required."
         return {"value": ratio, "flag": flag}
 
     def calculate_net_profit_margin(self, net_profit: float, turnover: float) -> float | None:
@@ -108,7 +102,7 @@ class FinancialAnalystAgent(BaseCreditAgent):
 
     def calculate_facility_utilization(self, drawn: float, limit: float) -> Dict[str, Any]:
         """CALC-006: Facility Utilisation = (Drawn ÷ Limit) * 100; Headroom = Limit - Drawn"""
-        headroom = max(0.0, limit - drawn)
+        headroom = limit - drawn
         utilization_pct = round((drawn / limit) * 100, 1) if limit > 0 else None
         return {"headroom": headroom, "utilization_pct": utilization_pct}
 
@@ -122,7 +116,7 @@ class FinancialAnalystAgent(BaseCreditAgent):
             }
 
         latest_p = periods[-1]
-        prior_p = periods[-2] if len(periods) >= 2 else latest_p
+        prior_p = periods[-2] if len(periods) >= 2 else None
         required_fields = {
             "turnover", "costOfSales", "ebit", "interestCharge", "netProfit",
             "totalBorrowings", "netAssets", "currentAssets", "currentLiabilities",
@@ -134,9 +128,9 @@ class FinancialAnalystAgent(BaseCreditAgent):
             for field in required_fields
             if not isinstance(latest_p, dict) or field not in latest_p or not self._valid_number(latest_p[field])
         )
-        if not isinstance(prior_p, dict):
+        if prior_p is not None and not isinstance(prior_p, dict):
             missing_fields.append("prior_period")
-        else:
+        elif isinstance(prior_p, dict):
             for field in ("turnover", "inventory"):
                 if field not in prior_p or not self._valid_number(prior_p[field]):
                     missing_fields.append(f"prior_period.{field}")
@@ -152,11 +146,17 @@ class FinancialAnalystAgent(BaseCreditAgent):
         cr = self.calculate_current_ratio(latest_p.get("currentAssets", 0), latest_p.get("currentLiabilities", 0))
         ic = self.calculate_interest_cover(latest_p.get("ebit", 0), latest_p.get("interestCharge", 0))
         npm = self.calculate_net_profit_margin(latest_p.get("netProfit", 0), latest_p.get("turnover", 1))
-        rev_yoy = self.calculate_yoy_change(latest_p.get("turnover", 0), prior_p.get("turnover", 0))
-        stock_days = self.calculate_stock_days(
-            prior_p.get("inventory", 0),
-            latest_p.get("inventory", 0),
-            latest_p.get("costOfSales", 1)
+        rev_yoy = (
+            self.calculate_yoy_change(latest_p["turnover"], prior_p["turnover"])
+            if prior_p is not None else None
+        )
+        stock_days = (
+            self.calculate_stock_days(
+                prior_p["inventory"],
+                latest_p["inventory"],
+                latest_p["costOfSales"],
+            )
+            if prior_p is not None else None
         )
 
         cf_audit = self.validate_cashflow_reconciliation(
@@ -205,7 +205,8 @@ class FinancialAnalystAgent(BaseCreditAgent):
                 "utilization_pct": calc["utilization_pct"]
             })
 
-        overall_exp = self.calculate_facility_utilization(total_drawn, total_limit)
+        has_exposure_data = bool(exposures)
+        overall_exp = self.calculate_facility_utilization(total_drawn, total_limit) if has_exposure_data else None
 
         analytics_set = {
             "status": "ANALYTICAL_ONLY",
@@ -219,10 +220,11 @@ class FinancialAnalystAgent(BaseCreditAgent):
             "stock_days": stock_days,
             "cashflow_audit": cf_audit,
             "exposure_profile": exposure_results,
-            "total_facility_limit": total_limit,
-            "total_facility_drawn": total_drawn,
-            "overall_headroom": overall_exp["headroom"],
-            "overall_utilization_pct": overall_exp["utilization_pct"]
+            "exposure_data_status": "SUPPLIED" if has_exposure_data else "NOT_SUPPLIED",
+            "total_facility_limit": total_limit if has_exposure_data else None,
+            "total_facility_drawn": total_drawn if has_exposure_data else None,
+            "overall_headroom": overall_exp["headroom"] if overall_exp else None,
+            "overall_utilization_pct": overall_exp["utilization_pct"] if overall_exp else None
         }
 
         self.log_activity(

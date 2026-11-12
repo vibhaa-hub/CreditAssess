@@ -24,16 +24,17 @@ import {
 export const DU10LifecycleReview: React.FC = () => {
   const { activeCase, triggerLifecycleEvent, setActiveDU } = useCreditAssessment();
 
-  const [simulatedTrigger, setSimulatedTrigger] = useState<string>(
-    'Director Resignation (Eleanor Pendelton - Companies House Filing)'
-  );
+  const [triggerDescription, setTriggerDescription] = useState('');
 
   const review = activeCase.periodicReview;
-  const nextDate = computeNextPeriodicReviewDate(review.lastReviewDate, review.cadence);
+  const nextDate = review.lastReviewDate
+    ? computeNextPeriodicReviewDate(review.lastReviewDate, review.cadence)
+    : '';
 
-  const handleSimulateTrigger = () => {
-    if (!simulatedTrigger.trim()) return;
-    triggerLifecycleEvent(simulatedTrigger);
+  const handleRecordTrigger = () => {
+    if (!triggerDescription.trim()) return;
+    triggerLifecycleEvent(triggerDescription.trim());
+    setTriggerDescription('');
   };
 
   return (
@@ -82,24 +83,26 @@ export const DU10LifecycleReview: React.FC = () => {
             </div>
             <div className="bg-slate-800/60 p-3 rounded-lg border border-slate-700/60">
               <span className="text-slate-400 block text-[11px]">Next Review Target (CALC-012)</span>
-              <span className="font-mono font-bold text-cyan-300 text-sm">{nextDate}</span>
+              <span className="font-mono font-bold text-cyan-300 text-sm">{nextDate || 'Not scheduled'}</span>
             </div>
           </div>
 
           <div className="p-3 bg-slate-950/60 rounded-lg border border-slate-800 text-xs space-y-1">
             <span className="font-bold text-white block">Cadence Decision Table DT-4 Mapping</span>
             <p className="text-[11px] text-slate-300 leading-relaxed">
-              CRA Rating: <span className="text-emerald-400 font-semibold">{activeCase.customerRiskAssessment?.craRating || 'LOW'}</span>. Policy DT-4 mandates standard <span className="text-white font-semibold">{review.cadence}</span> cycle. Zero overdue review days recorded (OBJ-05).
+              CRA Rating: <span className="text-emerald-400 font-semibold">{activeCase.customerRiskAssessment?.craRating || 'Not assessed'}</span>. Recorded cadence: <span className="text-white font-semibold">{review.cadence}</span>.
             </p>
           </div>
 
           {/* Overdue Review Escalation Notification (REQ-077) */}
-          <div className="p-3 bg-emerald-950/30 border border-emerald-900/60 rounded-lg text-xs flex items-center justify-between text-emerald-300">
+          <div className={`p-3 rounded-lg border text-xs flex items-center justify-between ${review.isOverdue ? 'bg-rose-950/30 border-rose-900/60 text-rose-300' : 'bg-slate-950/50 border-slate-800 text-slate-300'}`}>
             <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>Review schedule is on-track; zero overdue escalation alerts active.</span>
+              {review.isOverdue
+                ? <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                : <CheckCircle2 className="w-4 h-4 text-slate-400 shrink-0" />}
+              <span>{review.lastReviewDate ? (review.isOverdue ? `Review overdue by ${review.overdueDays} days.` : 'No overdue review recorded.') : 'Review date has not been supplied.'}</span>
             </div>
-            <span className="text-[10px] font-mono text-emerald-400 font-bold">OBJ-05 Compliant</span>
+            <span className="text-[10px] font-mono font-bold">{review.lastReviewDate ? 'Recorded schedule' : 'Data required'}</span>
           </div>
         </div>
 
@@ -118,29 +121,22 @@ export const DU10LifecycleReview: React.FC = () => {
             </div>
 
             <p className="text-[11px] text-slate-400">
-              Continually monitors corporate event streams (Companies House filings, credit bureau score alerts, OEM franchise shifts) to trigger un-scheduled credit reviews.
+              No external event feeds are configured. Record a customer or staff-reported event here; this does not create an external review case.
             </p>
 
             <div className="space-y-2 text-xs">
-              <label className="text-slate-400 block">Simulate Incoming Event Feed</label>
-              <select
-                value={simulatedTrigger}
-                onChange={(e) => setSimulatedTrigger(e.target.value)}
+              <label className="text-slate-400 block">Event description</label>
+              <input
+                value={triggerDescription}
+                onChange={(e) => setTriggerDescription(e.target.value)}
+                maxLength={500}
+                placeholder="Enter the reported event"
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white focus:outline-none"
-              >
-                <option value="Director Resignation (Companies House Form TM01)">
-                  Companies House: Director Resignation (Form TM01)
-                </option>
-                <option value="Credit Bureau Rating Downgrade (Equifax Alert)">
-                  Credit Bureau: Delinquency Score Downgrade (Alert)
-                </option>
-                <option value="OEM Franchise Territory Restructure (Stellantis)">
-                  OEM Partner: Territory Restructure Notice
-                </option>
-              </select>
+              />
 
               <button
-                onClick={handleSimulateTrigger}
+                onClick={handleRecordTrigger}
+                disabled={!triggerDescription.trim()}
                 className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5"
               >
                 <RotateCw className="w-4 h-4" />
@@ -172,10 +168,10 @@ export const DU10LifecycleReview: React.FC = () => {
                 <FileText className="w-4 h-4 text-cyan-400" />
                 <span className="font-bold text-white">Delta Review Pack Compiler (REQ-076)</span>
               </div>
-              <span className="text-[10px] text-emerald-400 font-mono">BR-E06 Reusable</span>
+              <span className="text-[10px] text-emerald-400 font-mono">              Customer case data</span>
             </div>
             <p className="text-slate-300 text-[11px] leading-relaxed">
-              Auto-compiles periodic review package pulling valid held data and highlighting what changed since the October 2025 submission (e.g. +£5.8M turnover delta, EV charging capital deployment).
+              Review the case information currently recorded in the system. No prior submission or external data source is assumed.
             </p>
             <div className="flex justify-end pt-1">
               <button

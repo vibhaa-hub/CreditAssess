@@ -5,6 +5,82 @@
  * ApexCredit AST Calculation Operations Engine
  * Implements CALC-001 through CALC-014 strictly per AST mathematical specifications & edge rules
  */
+import type { PeriodFinancials } from '../types/ast';
+
+export const financialSourceFields: (keyof PeriodFinancials)[] = [
+  'turnover',
+  'costOfSales',
+  'operatingExpenses',
+  'interestCharge',
+  'tax',
+  'currentAssets',
+  'inventory',
+  'tradeDebtors',
+  'cashAndEquivalents',
+  'totalAssets',
+  'currentLiabilities',
+  'tradeCreditors',
+  'shortTermBorrowings',
+  'longTermBorrowings',
+  'totalLiabilities',
+  'shareholdersEquity',
+  'tangibleEquity',
+  'openingCash',
+  'operatingCashflow',
+  'investingCashflow',
+  'financingCashflow',
+  'closingCash',
+];
+
+export function isFinancialFieldEntered(period: PeriodFinancials, field: keyof PeriodFinancials): boolean {
+  return period.enteredFields === undefined || period.enteredFields.includes(field);
+}
+
+type CalculatedFinancialField =
+  | 'grossProfit'
+  | 'ebit'
+  | 'profitBeforeTax'
+  | 'netProfit'
+  | 'totalBorrowings'
+  | 'netAssets'
+  | 'cashflowDifference';
+
+export const financialCalculationRules: {
+  id: string;
+  inputs: (keyof PeriodFinancials)[];
+  output: CalculatedFinancialField;
+  calculate: (period: PeriodFinancials) => number;
+}[] = [
+  { id: 'CALC-PL-001', inputs: ['turnover', 'costOfSales'], output: 'grossProfit', calculate: (p) => p.turnover - p.costOfSales },
+  { id: 'CALC-PL-002', inputs: ['grossProfit', 'operatingExpenses'], output: 'ebit', calculate: (p) => p.grossProfit - p.operatingExpenses },
+  { id: 'CALC-PL-003', inputs: ['ebit', 'interestCharge'], output: 'profitBeforeTax', calculate: (p) => p.ebit - p.interestCharge },
+  { id: 'CALC-PL-004', inputs: ['profitBeforeTax', 'tax'], output: 'netProfit', calculate: (p) => p.profitBeforeTax - p.tax },
+  { id: 'CALC-BS-001', inputs: ['shortTermBorrowings', 'longTermBorrowings'], output: 'totalBorrowings', calculate: (p) => p.shortTermBorrowings + p.longTermBorrowings },
+  { id: 'CALC-BS-002', inputs: ['totalAssets', 'totalLiabilities'], output: 'netAssets', calculate: (p) => p.totalAssets - p.totalLiabilities },
+  {
+    id: 'CALC-CF-001',
+    inputs: ['openingCash', 'operatingCashflow', 'investingCashflow', 'financingCashflow', 'closingCash'],
+    output: 'cashflowDifference',
+    calculate: (p) => p.openingCash + p.operatingCashflow + p.investingCashflow + p.financingCashflow - p.closingCash,
+  },
+];
+
+export function recalculateFinancialPeriod(period: PeriodFinancials): PeriodFinancials {
+  const enteredFields = new Set(period.enteredFields ?? financialSourceFields);
+  for (const rule of financialCalculationRules) enteredFields.delete(rule.output);
+  const has = (field: keyof PeriodFinancials) => period.enteredFields === undefined || enteredFields.has(field);
+  const result = { ...period };
+
+  for (const rule of financialCalculationRules) {
+    if (rule.inputs.every(has)) {
+      result[rule.output] = rule.calculate(result);
+      enteredFields.add(rule.output);
+    }
+  }
+
+  if (period.enteredFields !== undefined) result.enteredFields = [...enteredFields];
+  return result;
+}
 
 /**
  * CALC-001: Gearing = Total Borrowings ÷ Net Worth
@@ -20,11 +96,7 @@ export function calculateGearing(totalBorrowings: number, netWorth: number): {
       flag: 'Negative or zero Net Worth: Gearing is not meaningful under Credit Policy BR-D05',
     };
   }
-  const ratio = Number((totalBorrowings / netWorth).toFixed(2));
-  return {
-    value: ratio,
-    flag: ratio > 2.5 ? 'High Enterprise Leverage (> 2.5x)' : undefined,
-  };
+  return { value: Number((totalBorrowings / netWorth).toFixed(2)) };
 }
 
 /**
@@ -42,13 +114,7 @@ export function calculateCurrentRatio(
     };
   }
   const ratio = Number((currentAssets / currentLiabilities).toFixed(2));
-  let commentary = 'Sound short-term liquidity headroom.';
-  if (ratio < 1.0) {
-    commentary = 'Working capital deficit (Current assets < Current liabilities). Potential liquidity strain.';
-  } else if (ratio < 1.2) {
-    commentary = 'Tight liquidity buffer; monitoring recommended.';
-  }
-  return { value: ratio, commentary };
+  return { value: ratio, commentary: 'Calculated from the supplied current assets and liabilities.' };
 }
 
 /**
@@ -58,39 +124,36 @@ export function calculateCurrentRatio(
 export function calculateInterestCover(
   ebit: number,
   interestCharge: number
-): { value: number; flag?: string } {
+): { value: number | 'not calculable'; flag?: string } {
   if (interestCharge <= 0) {
     return {
-      value: ebit > 0 ? 999.0 : 0.0,
-      flag: 'Zero interest charge reported',
+      value: 'not calculable',
+      flag: 'Enter a positive interest charge to calculate interest cover.',
     };
   }
   const ratio = Number((ebit / interestCharge).toFixed(2));
   if (ebit < 0) {
     return {
       value: ratio,
-      flag: 'Operating Loss (EBIT < 0): Dealer is failing to service commercial debt from core operations.',
+      flag: 'EBIT is negative in the supplied figures.',
     };
   }
-  return {
-    value: ratio,
-    flag: ratio < 2.0 ? 'Thin interest cover (< 2.0x covenant threshold)' : undefined,
-  };
+  return { value: ratio };
 }
 
 /**
  * CALC-004: Net Profit Margin = (Net Profit ÷ Turnover) * 100
  */
-export function calculateNetProfitMargin(netProfit: number, turnover: number): number {
-  if (turnover <= 0) return 0.0;
+export function calculateNetProfitMargin(netProfit: number, turnover: number): number | 'not calculable' {
+  if (turnover <= 0) return 'not calculable';
   return Number(((netProfit / turnover) * 100).toFixed(2));
 }
 
 /**
  * CALC-005: YoY Change % = ((Current Value - Prior Value) ÷ |Prior Value|) * 100
  */
-export function calculateYoYChange(currentValue: number, priorValue: number): number {
-  if (priorValue === 0) return 0.0;
+export function calculateYoYChange(currentValue: number, priorValue: number): number | 'not calculable' {
+  if (priorValue === 0) return 'not calculable';
   return Number((((currentValue - priorValue) / Math.abs(priorValue)) * 100).toFixed(2));
 }
 
@@ -143,8 +206,8 @@ export function calculateStockDays(
   openingStock: number,
   closingStock: number,
   costOfSales: number
-): number {
-  if (costOfSales <= 0) return 0;
+): number | 'not calculable' {
+  if (costOfSales <= 0) return 'not calculable';
   const avgStock = (openingStock + closingStock) / 2;
   return Number(((avgStock / costOfSales) * 365).toFixed(1));
 }

@@ -7,6 +7,7 @@
 
 import React, { useState } from 'react';
 import { useCreditAssessment } from '../../context/CreditAssessmentContext';
+import type { PeriodFinancials } from '../../types/ast';
 import {
   calculateGearing,
   calculateCurrentRatio,
@@ -16,6 +17,8 @@ import {
   calculateStockDays,
   validateCashflowReconciliation,
   calculateFacilityExposure,
+  isFinancialFieldEntered,
+  financialSourceFields,
 } from '../../utils/calculations';
 import {
   FileSpreadsheet,
@@ -34,10 +37,68 @@ import {
 } from 'lucide-react';
 import { FCABoundaryDrawer } from '../FCABoundaryDrawer';
 
+const financialInputGroups = [
+  {
+    title: 'Profit & loss',
+    fields: [
+      ['turnover', 'Turnover / revenue'],
+      ['costOfSales', 'Cost of sales'],
+      ['operatingExpenses', 'Operating expenses'],
+      ['interestCharge', 'Interest charge'],
+      ['tax', 'Tax'],
+    ],
+  },
+  {
+    title: 'Balance sheet',
+    fields: [
+      ['currentAssets', 'Current assets'],
+      ['inventory', 'Inventory'],
+      ['tradeDebtors', 'Trade debtors'],
+      ['cashAndEquivalents', 'Cash and equivalents'],
+      ['totalAssets', 'Total assets'],
+      ['currentLiabilities', 'Current liabilities'],
+      ['tradeCreditors', 'Trade creditors'],
+      ['shortTermBorrowings', 'Short-term borrowings'],
+      ['longTermBorrowings', 'Long-term borrowings'],
+      ['totalLiabilities', 'Total liabilities'],
+      ['shareholdersEquity', 'Shareholders’ equity'],
+      ['tangibleEquity', 'Tangible equity'],
+    ],
+  },
+  {
+    title: 'Cash flow',
+    fields: [
+      ['openingCash', 'Opening cash'],
+      ['operatingCashflow', 'Operating cash flow'],
+      ['investingCashflow', 'Investing cash flow'],
+      ['financingCashflow', 'Financing cash flow'],
+      ['closingCash', 'Closing cash'],
+    ],
+  },
+] as const;
+
+function formatFinancialAmount(
+  period: PeriodFinancials,
+  field: keyof PeriodFinancials,
+  divisor: number,
+  decimals: number,
+  suffix: string
+): string {
+  const value = period[field];
+  if (!isFinancialFieldEntered(period, field) || typeof value !== 'number') return '—';
+  return `${(value / divisor).toFixed(decimals)}${suffix}`;
+}
+
 export const DU05FinancialSpreading: React.FC = () => {
-  const { activeCase, updateFinancialCell, setActiveDU } = useCreditAssessment();
+  const {
+    activeCase,
+    updateFinancialCell,
+    updateFinancialPeriodMetadata,
+    addFinancialPeriod,
+    setActiveDU,
+  } = useCreditAssessment();
   const [selectedPeriodIdx, setSelectedPeriodIdx] = useState<number>(
-    activeCase.financialPeriods.length - 1
+    Math.max(0, activeCase.financialPeriods.length - 1)
   );
   const [activeTab, setActiveTab] = useState<'SPREADSHEET' | 'RATIOS' | 'CROSS_LINE' | 'AI_COMMENTARY'>('SPREADSHEET');
   const [aiCommentaryText, setAiCommentaryText] = useState<string>('');
@@ -46,15 +107,61 @@ export const DU05FinancialSpreading: React.FC = () => {
 
   const periods = activeCase.financialPeriods;
   const currentP = periods[selectedPeriodIdx] || periods[0];
+  if (!currentP) {
+    return (
+      <div className="space-y-6 rounded-2xl border border-slate-800 bg-slate-900 p-6">
+        <div>
+          <p className="text-xs font-mono font-bold text-cyan-300">[DU-05] Financial spreading</p>
+          <h1 className="mt-2 text-xl font-bold text-white">Enter financial data supplied by the business</h1>
+          <p className="mt-2 max-w-3xl text-sm text-slate-400">
+            No financial periods are recorded. Upload a supported CSV in DU-02, then enter and verify source figures here.
+            Calculations remain unavailable until the relevant inputs are supplied.
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            addFinancialPeriod();
+            setSelectedPeriodIdx(0);
+          }}
+          className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white"
+        >
+          Enter financial period
+        </button>
+      </div>
+    );
+  }
   const priorP = selectedPeriodIdx > 0 ? periods[selectedPeriodIdx - 1] : currentP;
 
-  // Real-time calculations using pure functions
-  const gearingCalc = calculateGearing(currentP.totalBorrowings, currentP.netAssets);
-  const currentRatioCalc = calculateCurrentRatio(currentP.currentAssets, currentP.currentLiabilities);
-  const interestCoverCalc = calculateInterestCover(currentP.ebit, currentP.interestCharge);
-  const netProfitMarginCalc = calculateNetProfitMargin(currentP.netProfit, currentP.turnover);
-  const yoyRevCalc = calculateYoYChange(currentP.turnover, priorP.turnover);
-  const stockDaysCalc = calculateStockDays(priorP.inventory, currentP.inventory, currentP.costOfSales);
+  const fieldEntered = (field: keyof typeof currentP) => isFinancialFieldEntered(currentP, field);
+  const gearingReady = fieldEntered('totalBorrowings') && fieldEntered('netAssets');
+  const currentRatioReady = fieldEntered('currentAssets') && fieldEntered('currentLiabilities');
+  const interestCoverReady = fieldEntered('ebit') && fieldEntered('interestCharge');
+  const marginReady = fieldEntered('netProfit') && fieldEntered('turnover');
+  const yoyReady = selectedPeriodIdx > 0
+    && fieldEntered('turnover')
+    && isFinancialFieldEntered(priorP, 'turnover');
+  const stockDaysReady = fieldEntered('inventory')
+    && fieldEntered('costOfSales')
+    && (selectedPeriodIdx === 0 || isFinancialFieldEntered(priorP, 'inventory'));
+  const cashflowReady = (['openingCash', 'operatingCashflow', 'investingCashflow', 'financingCashflow', 'closingCash'] as const)
+    .every(fieldEntered);
+  const financialInputsComplete = financialSourceFields.every(fieldEntered);
+  const gearingCalc = gearingReady
+    ? calculateGearing(currentP.totalBorrowings, currentP.netAssets)
+    : { value: 'awaiting data' as const, flag: undefined };
+  const currentRatioCalc = currentRatioReady
+    ? calculateCurrentRatio(currentP.currentAssets, currentP.currentLiabilities)
+    : { value: 'awaiting data' as const, commentary: 'Enter current assets and current liabilities to calculate.' };
+  const interestCoverCalc = interestCoverReady
+    ? calculateInterestCover(currentP.ebit, currentP.interestCharge)
+    : { value: 'awaiting data' as const, flag: undefined };
+  const netProfitMarginCalc = marginReady
+    ? calculateNetProfitMargin(currentP.netProfit, currentP.turnover)
+    : 'awaiting data';
+  const yoyRevCalc = yoyReady ? calculateYoYChange(currentP.turnover, priorP.turnover) : 'awaiting data';
+  const stockDaysCalc = stockDaysReady
+    ? calculateStockDays(priorP.inventory, currentP.inventory, currentP.costOfSales)
+    : 'awaiting data';
   const cashflowAudit = validateCashflowReconciliation(
     currentP.openingCash,
     currentP.operatingCashflow,
@@ -63,6 +170,11 @@ export const DU05FinancialSpreading: React.FC = () => {
     currentP.closingCash
   );
 
+  const addPeriod = () => {
+    addFinancialPeriod();
+    setSelectedPeriodIdx(periods.length);
+  };
+
   const handleGenerateFinancialCommentary = async () => {
     setIsGeneratingCommentary(true);
     try {
@@ -70,7 +182,7 @@ export const DU05FinancialSpreading: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          dealerName: activeCase.dealerProfile.legalName,
+          businessName: activeCase.dealerProfile.legalName,
           ratios: {
             gearing: gearingCalc.value,
             currentRatio: currentRatioCalc.value,
@@ -169,26 +281,106 @@ export const DU05FinancialSpreading: React.FC = () => {
           {
             code: 'CALC-001..014',
             name: 'Mathematical Spreading Formulas',
-            status: 'PASS',
+            status: financialInputsComplete ? 'PASS' : 'PENDING',
             fcaCitation: 'FCA CONC 5.2A / PRA SS1/23',
-            description: 'Zero hallucination risk. Financial ratios (Gearing, DSCR, Quick Ratio, Headroom) are derived via strict arithmetic code.',
+            description: 'Ratios and derived statement totals recalculate from the supplied source figures; missing inputs remain unavailable.',
           },
           {
             code: 'CALC-007',
             name: 'Cashflow Reconciliation Invariant',
-            status: cashflowAudit.isReconciled ? 'PASS' : 'PENDING',
+            status: cashflowReady && cashflowAudit.isReconciled ? 'PASS' : 'PENDING',
             fcaCitation: 'Statutory Accounts Standards',
             description: 'Opening Cash + Cash Flows - Closing Cash must mathematically equal £0 discrepancy before submission.',
           },
           {
             code: 'REQ-043',
             name: 'Multi-Line Borrowing Consolidation',
-            status: 'PASS',
-            fcaCitation: 'SOPRA Apak Wholesale API',
-            description: 'Limits across wholesale, franchise, and fleet are aggregated to evaluate total group exposure.',
+            status: activeCase.crossLineExposures.length ? 'PASS' : 'PENDING',
+            fcaCitation: 'External exposure source',
+            description: 'No connected servicing platform is configured; exposure data must be supplied and reviewed.',
           },
         ]}
       />
+
+      <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold text-white">Source figures · GBP</h2>
+            <p className="mt-1 text-xs text-slate-400">
+              Values are saved to this case. Gross profit, EBIT, profit before tax, net profit, total borrowings,
+              net assets, and cash-flow difference are recalculated from their component inputs.
+            </p>
+          </div>
+          <button onClick={addPeriod} className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-cyan-300">
+            Add financial period
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {periods.map((period, index) => (
+            <button
+              key={`${period.periodEndDate}-${index}`}
+              onClick={() => setSelectedPeriodIdx(index)}
+              className={`rounded-lg px-3 py-1.5 text-xs ${selectedPeriodIdx === index ? 'bg-cyan-700 text-white' : 'bg-slate-800 text-slate-300'}`}
+            >
+              {period.periodLabel || `Period ${index + 1}`}
+            </button>
+          ))}
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <label className="text-xs text-slate-300">
+            Period label
+            <input
+              value={currentP.periodLabel}
+              onChange={(event) => updateFinancialPeriodMetadata(selectedPeriodIdx, { periodLabel: event.target.value })}
+              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 p-2 text-white"
+              placeholder="e.g. Financial year ended"
+            />
+          </label>
+          <label className="text-xs text-slate-300">
+            Period end date
+            <input
+              type="date"
+              value={currentP.periodEndDate}
+              onChange={(event) => updateFinancialPeriodMetadata(selectedPeriodIdx, { periodEndDate: event.target.value })}
+              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 p-2 text-white"
+            />
+          </label>
+          <label className="flex items-center gap-2 pt-5 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={currentP.isAudited}
+              onChange={(event) => updateFinancialPeriodMetadata(selectedPeriodIdx, { isAudited: event.target.checked })}
+            />
+            Customer identifies period as audited (not independently verified)
+          </label>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-3">
+          {financialInputGroups.map((group) => (
+            <fieldset key={group.title} className="space-y-2 rounded-lg border border-slate-800 p-3">
+              <legend className="px-1 text-xs font-semibold text-cyan-300">{group.title}</legend>
+              {group.fields.map(([field, label]) => (
+                <label key={field} className="block text-[11px] text-slate-400">
+                  {label}
+                  <input
+                    type="number"
+                    step="any"
+                    value={isFinancialFieldEntered(currentP, field) ? currentP[field] : ''}
+                    onChange={(event) => updateFinancialCell(
+                      selectedPeriodIdx,
+                      field,
+                      event.target.value === '' ? undefined : Number(event.target.value)
+                    )}
+                    className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-right font-mono text-white"
+                  />
+                </label>
+              ))}
+            </fieldset>
+          ))}
+        </div>
+        <p className="text-[11px] text-amber-300">
+          Confirm each amount against the customer&apos;s source document. Uploading a CSV in DU-02 does not automatically map or verify its contents.
+        </p>
+      </div>
 
       {/* Tab 1: Multi-Period Normalized Accounts */}
       {activeTab === 'SPREADSHEET' && (
@@ -196,24 +388,30 @@ export const DU05FinancialSpreading: React.FC = () => {
           {/* Cashflow Mathematical Audit Banner (CALC-007) */}
           <div
             className={`p-3.5 rounded-xl border flex items-center justify-between text-xs ${
-              cashflowAudit.isReconciled
+              cashflowReady && cashflowAudit.isReconciled
                 ? 'bg-emerald-950/40 border-emerald-800/80 text-emerald-300'
-                : 'bg-red-950/40 border-red-800 text-red-300'
+                : cashflowReady
+                  ? 'bg-red-950/40 border-red-800 text-red-300'
+                  : 'bg-amber-950/40 border-amber-800 text-amber-300'
             }`}
           >
             <div className="flex items-center gap-2.5">
-              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+              {cashflowReady && cashflowAudit.isReconciled
+                ? <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                : <AlertTriangle className="w-5 h-5 shrink-0" />}
               <div>
                 <span className="font-bold">
                   Mathematical Integrity Audit: Cashflow Reconciliation (CALC-007)
                 </span>
                 <p className="text-[11px] text-slate-300">
-                  Opening Cash (£{(currentP.openingCash / 1000).toFixed(0)}k) + Inflows (£{((currentP.operatingCashflow) / 1000).toFixed(0)}k) - Outflows = Closing Cash (£{(currentP.closingCash / 1000).toFixed(0)}k). Zero mathematical discrepancy.
+                  {cashflowReady
+                    ? `Calculated cash-flow difference: £${cashflowAudit.discrepancy.toLocaleString()}`
+                    : 'Enter all cash-flow inputs to run reconciliation.'}
                 </p>
               </div>
             </div>
-            <span className="font-mono text-[10px] bg-emerald-900/60 text-emerald-200 px-2 py-1 rounded font-bold border border-emerald-800">
-              Discrepancy: £{cashflowAudit.discrepancy}
+            <span className="font-mono text-[10px] px-2 py-1 rounded font-bold border border-slate-700">
+              {cashflowReady ? `Difference: £${cashflowAudit.discrepancy}` : 'Pending source data'}
             </span>
           </div>
 
@@ -234,9 +432,9 @@ export const DU05FinancialSpreading: React.FC = () => {
                     <th className="py-2.5 px-4 font-semibold w-1/3">Financial Metric / Spreading Line</th>
                     {periods.map((p, idx) => (
                       <th key={idx} className="py-2.5 px-4 font-semibold text-right">
-                        <div>{p.periodLabel}</div>
+                        <div>{p.periodLabel || `Period ${idx + 1}`}</div>
                         <span className="text-[10px] font-mono text-cyan-400 font-normal">
-                          {p.isAudited ? 'Audited' : 'Unaudited MI'}
+                          {p.isAudited ? 'Customer marked audited' : 'Customer marked MI'}
                         </span>
                       </th>
                     ))}
@@ -256,7 +454,7 @@ export const DU05FinancialSpreading: React.FC = () => {
                     </td>
                     {periods.map((p, idx) => (
                       <td key={idx} className="py-2 px-4 text-right font-mono font-semibold text-white">
-                        £{(p.turnover / 1000000).toFixed(2)}M
+                        £{formatFinancialAmount(p, 'turnover', 1000000, 2, 'M')}
                       </td>
                     ))}
                   </tr>
@@ -264,7 +462,7 @@ export const DU05FinancialSpreading: React.FC = () => {
                     <td className="py-2 px-4 text-slate-400">Cost of Sales (CoS)</td>
                     {periods.map((p, idx) => (
                       <td key={idx} className="py-2 px-4 text-right font-mono text-slate-300">
-                        £{(p.costOfSales / 1000000).toFixed(2)}M
+                        £{formatFinancialAmount(p, 'costOfSales', 1000000, 2, 'M')}
                       </td>
                     ))}
                   </tr>
@@ -272,7 +470,7 @@ export const DU05FinancialSpreading: React.FC = () => {
                     <td className="py-2 px-4 text-white">Gross Profit</td>
                     {periods.map((p, idx) => (
                       <td key={idx} className="py-2 px-4 text-right font-mono text-emerald-300">
-                        £{(p.grossProfit / 1000000).toFixed(2)}M
+                        £{formatFinancialAmount(p, 'grossProfit', 1000000, 2, 'M')}
                       </td>
                     ))}
                   </tr>
@@ -280,7 +478,7 @@ export const DU05FinancialSpreading: React.FC = () => {
                     <td className="py-2 px-4 text-slate-400">Operating Expenses</td>
                     {periods.map((p, idx) => (
                       <td key={idx} className="py-2 px-4 text-right font-mono text-slate-300">
-                        £{(p.operatingExpenses / 1000000).toFixed(2)}M
+                        £{formatFinancialAmount(p, 'operatingExpenses', 1000000, 2, 'M')}
                       </td>
                     ))}
                   </tr>
@@ -291,7 +489,7 @@ export const DU05FinancialSpreading: React.FC = () => {
                     </td>
                     {periods.map((p, idx) => (
                       <td key={idx} className="py-2.5 px-4 text-right font-mono text-cyan-300 font-bold">
-                        £{(p.ebit / 1000).toFixed(0)}k
+                        £{formatFinancialAmount(p, 'ebit', 1000, 0, 'k')}
                       </td>
                     ))}
                   </tr>
@@ -299,7 +497,7 @@ export const DU05FinancialSpreading: React.FC = () => {
                     <td className="py-2 px-4 text-slate-400">Interest Charge</td>
                     {periods.map((p, idx) => (
                       <td key={idx} className="py-2 px-4 text-right font-mono text-amber-300">
-                        £{(p.interestCharge / 1000).toFixed(0)}k
+                        £{formatFinancialAmount(p, 'interestCharge', 1000, 0, 'k')}
                       </td>
                     ))}
                   </tr>
@@ -307,7 +505,7 @@ export const DU05FinancialSpreading: React.FC = () => {
                     <td className="py-2.5 px-4 text-emerald-300">Net Profit Attributable</td>
                     {periods.map((p, idx) => (
                       <td key={idx} className="py-2.5 px-4 text-right font-mono text-emerald-400 text-sm">
-                        £{(p.netProfit / 1000).toFixed(0)}k
+                        £{formatFinancialAmount(p, 'netProfit', 1000, 0, 'k')}
                       </td>
                     ))}
                   </tr>
@@ -319,10 +517,10 @@ export const DU05FinancialSpreading: React.FC = () => {
                     </td>
                   </tr>
                   <tr>
-                    <td className="py-2 px-4 text-slate-300">Vehicle Inventory (Stock)</td>
+                    <td className="py-2 px-4 text-slate-300">Inventory (Stock)</td>
                     {periods.map((p, idx) => (
                       <td key={idx} className="py-2 px-4 text-right font-mono text-slate-200">
-                        £{(p.inventory / 1000000).toFixed(2)}M
+                        £{formatFinancialAmount(p, 'inventory', 1000000, 2, 'M')}
                       </td>
                     ))}
                   </tr>
@@ -330,7 +528,7 @@ export const DU05FinancialSpreading: React.FC = () => {
                     <td className="py-2 px-4 text-slate-300">Current Assets</td>
                     {periods.map((p, idx) => (
                       <td key={idx} className="py-2 px-4 text-right font-mono text-slate-200">
-                        £{(p.currentAssets / 1000000).toFixed(2)}M
+                        £{formatFinancialAmount(p, 'currentAssets', 1000000, 2, 'M')}
                       </td>
                     ))}
                   </tr>
@@ -338,7 +536,7 @@ export const DU05FinancialSpreading: React.FC = () => {
                     <td className="py-2 px-4 text-slate-300">Current Liabilities</td>
                     {periods.map((p, idx) => (
                       <td key={idx} className="py-2 px-4 text-right font-mono text-slate-200">
-                        £{(p.currentLiabilities / 1000000).toFixed(2)}M
+                        £{formatFinancialAmount(p, 'currentLiabilities', 1000000, 2, 'M')}
                       </td>
                     ))}
                   </tr>
@@ -346,7 +544,7 @@ export const DU05FinancialSpreading: React.FC = () => {
                     <td className="py-2 px-4 text-slate-300">Total Borrowings (Debt)</td>
                     {periods.map((p, idx) => (
                       <td key={idx} className="py-2 px-4 text-right font-mono text-amber-300">
-                        £{(p.totalBorrowings / 1000000).toFixed(2)}M
+                        £{formatFinancialAmount(p, 'totalBorrowings', 1000000, 2, 'M')}
                       </td>
                     ))}
                   </tr>
@@ -354,7 +552,7 @@ export const DU05FinancialSpreading: React.FC = () => {
                     <td className="py-2.5 px-4 text-cyan-300">Net Assets / Shareholders Equity (Net Worth)</td>
                     {periods.map((p, idx) => (
                       <td key={idx} className="py-2.5 px-4 text-right font-mono text-cyan-300 text-sm">
-                        £{(p.netAssets / 1000000).toFixed(2)}M
+                        £{formatFinancialAmount(p, 'netAssets', 1000000, 2, 'M')}
                       </td>
                     ))}
                   </tr>
@@ -378,12 +576,12 @@ export const DU05FinancialSpreading: React.FC = () => {
               <span className="text-2xl font-bold font-mono text-cyan-300">
                 {typeof gearingCalc.value === 'number' ? `${gearingCalc.value}x` : gearingCalc.value}
               </span>
-              <span className="text-xs text-slate-400">Benchmark: &lt; 2.5x</span>
+              <span className="text-xs text-slate-400">Policy benchmark: not configured</span>
             </div>
             {gearingCalc.flag ? (
               <p className="text-[11px] text-amber-300">{gearingCalc.flag}</p>
             ) : (
-              <p className="text-[11px] text-emerald-400">✓ Prudent leverage within governed policy tolerance.</p>
+              <p className="text-[11px] text-slate-400">Policy interpretation is not configured.</p>
             )}
           </div>
 
@@ -397,7 +595,7 @@ export const DU05FinancialSpreading: React.FC = () => {
               <span className="text-2xl font-bold font-mono text-emerald-300">
                 {typeof currentRatioCalc.value === 'number' ? `${currentRatioCalc.value}x` : currentRatioCalc.value}
               </span>
-              <span className="text-xs text-slate-400">Target: &gt; 1.2x</span>
+              <span className="text-xs text-slate-400">Policy target: not configured</span>
             </div>
             <p className="text-[11px] text-slate-300">{currentRatioCalc.commentary}</p>
           </div>
@@ -410,14 +608,14 @@ export const DU05FinancialSpreading: React.FC = () => {
             </div>
             <div className="flex items-baseline gap-2">
               <span className="text-2xl font-bold font-mono text-purple-300">
-                {interestCoverCalc.value}x
+                {typeof interestCoverCalc.value === 'number' ? `${interestCoverCalc.value}x` : interestCoverCalc.value}
               </span>
-              <span className="text-xs text-slate-400">Covenant: &gt; 2.0x</span>
+              <span className="text-xs text-slate-400">Policy threshold: not configured</span>
             </div>
             {interestCoverCalc.flag ? (
               <p className="text-[11px] text-amber-300">{interestCoverCalc.flag}</p>
             ) : (
-              <p className="text-[11px] text-emerald-400">✓ Robust debt servicing capacity (5.02x).</p>
+              <p className="text-[11px] text-slate-400">Policy interpretation is not configured.</p>
             )}
           </div>
 
@@ -429,11 +627,11 @@ export const DU05FinancialSpreading: React.FC = () => {
             </div>
             <div className="flex items-baseline gap-2">
               <span className="text-2xl font-bold font-mono text-emerald-300">
-                {netProfitMarginCalc}%
+                {typeof netProfitMarginCalc === 'number' ? `${netProfitMarginCalc}%` : netProfitMarginCalc}
               </span>
-              <span className="text-xs text-slate-400">Motor retail avg: 1.5 - 2.2%</span>
+              <span className="text-xs text-slate-400">Industry benchmark: not configured</span>
             </div>
-            <p className="text-[11px] text-slate-300">Consistent motor dealership net margin performance.</p>
+            <p className="text-[11px] text-slate-300">Calculated from the supplied net profit and turnover.</p>
           </div>
 
           {/* Card: CALC-005 YoY Growth */}
@@ -444,26 +642,26 @@ export const DU05FinancialSpreading: React.FC = () => {
             </div>
             <div className="flex items-baseline gap-2">
               <span className="text-2xl font-bold font-mono text-cyan-300">
-                +{yoyRevCalc}%
+                {typeof yoyRevCalc === 'number' && yoyRevCalc > 0 ? '+' : ''}{typeof yoyRevCalc === 'number' ? `${yoyRevCalc}%` : yoyRevCalc}
               </span>
-              <span className="text-xs text-slate-400">Prior Period: £{(priorP.turnover / 1000000).toFixed(1)}M</span>
+              <span className="text-xs text-slate-400">Prior Period: £{formatFinancialAmount(priorP, 'turnover', 1000000, 1, 'M')}</span>
             </div>
-            <p className="text-[11px] text-slate-300">Expansion driven by EV fleet dealership onboarding.</p>
+            <p className="text-[11px] text-slate-300">Calculated against the prior entered period.</p>
           </div>
 
           {/* Card: CALC-009 Stock Turnaround Days */}
           <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-white">Vehicle Stock Turn (CALC-009)</span>
+              <span className="text-xs font-bold text-white">Inventory Turn (CALC-009)</span>
               <span className="text-[10px] font-mono text-cyan-400">(Avg Stock ÷ CoS) * 365</span>
             </div>
             <div className="flex items-baseline gap-2">
               <span className="text-2xl font-bold font-mono text-amber-300">
-                {stockDaysCalc} Days
+                {typeof stockDaysCalc === 'number' ? `${stockDaysCalc} days` : stockDaysCalc}
               </span>
-              <span className="text-xs text-slate-400">Policy cap: 60 Days</span>
+              <span className="text-xs text-slate-400">Policy benchmark: not configured</span>
             </div>
-            <p className="text-[11px] text-slate-300">Active used car floorplan aging strictly managed under 50 days.</p>
+            <p className="text-[11px] text-slate-300">Calculated from average inventory and cost of sales.</p>
           </div>
         </div>
       )}
@@ -475,11 +673,11 @@ export const DU05FinancialSpreading: React.FC = () => {
             <div>
               <h2 className="text-sm font-bold text-white">ConsolidatedBorrowingProfile (REQ-043 / BR-D06)</h2>
               <p className="text-xs text-slate-400">
-                Consolidated credit limits, live drawn balances, headroom, and facility utilization across Wholesale, Franchise, and Fleet.
+                Consolidated limits, drawn balances, headroom, and utilization for facilities recorded in this case.
               </p>
             </div>
             <span className="text-xs font-mono bg-cyan-950 text-cyan-300 border border-cyan-800 px-2.5 py-1 rounded">
-              SOPRA Apak Integration Live
+              External exposure data not configured
             </span>
           </div>
 
@@ -576,11 +774,11 @@ export const DU05FinancialSpreading: React.FC = () => {
                 <h2 className="text-sm font-bold text-white flex items-center space-x-2">
                   <span>Gemini 3.8 Flash Financial Metric Commentary</span>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                    CALC-001..010 Grounded
+                    Based on supplied case data
                   </span>
                 </h2>
                 <p className="text-xs text-slate-400">
-                  Synthesizes multi-period EBITDA trend, debt service coverage (DSCR), and wholesale stock turn velocity with source line citations.
+                  Summarizes supplied financial periods and calculated metrics; verify source evidence before relying on commentary.
                 </p>
               </div>
             </div>
@@ -612,7 +810,7 @@ export const DU05FinancialSpreading: React.FC = () => {
                 <Sparkles className="w-6 h-6" />
               </div>
               <p className="text-xs text-slate-300">
-                Evaluating balance sheet leverage, DSCR headroom, and Apak stock concentration...
+                Preparing commentary from supplied financial data...
               </p>
             </div>
           ) : (

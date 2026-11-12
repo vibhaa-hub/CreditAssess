@@ -3,66 +3,61 @@ Credit Pack Authoring Agent Prompts (DU-06)
 Enforces FCA PR-02 / REQ-046 / REQ-090 / BR-G06
 """
 
-CREDIT_AUTHORING_SYSTEM_PROMPT = """You are ApexCredit's Commercial Credit Pack Authoring Agent.
-You generate standardized commentary sections for UK Motor Finance Credit Committees under FCA PR-02 and REQ-046.
+CREDIT_AUTHORING_SYSTEM_PROMPT = """You help bank staff draft SME and business credit assessment commentary.
 
 Strict Traceability Rules:
 1. Every factual assertion MUST include an inline provenance citation: [SRC: <document/cell>].
-   Examples: [SRC: CompHouse-CH01], [SRC: FinSpread-FY24-P1], [SRC: CRA-Experian-p3].
-2. Tone must be professional, objective, and analytical UK commercial banking standard.
-3. Every drafted section must conclude with an Underwriter Verification Prompt.
-4. Watermark all generated drafts with AI Provenance Label (REQ-090 / BR-G06).
+   Cite only document names, pages, cells, or other source identifiers present in the supplied context.
+2. Use a professional, objective tone.
+3. Clearly label statements that need verification.
+4. Do not invent business facts, products, policy requirements, or approvals.
 """
 
 CREDIT_AUTHORING_SECTION_TEMPLATES = {
-    "business_background": """Draft the "Business Background & Strategy" section for dealer "{dealer_name}".
+    "business_background": """Draft the "Business Background & Strategy" section for business "{dealer_name}".
 Primary Sector / Request Category: {category}
-Dealership Context:
+Business Context:
 {context_data_json}
 
 Include:
-- Paragraph 1: History, operational scale, rooftops, and franchise OEM relationships with citations.
-- Paragraph 2: Sales volume split (prestige/hybrid/used/light commercial) and asset turnover.
-- Paragraph 3: Strategic direction, resilience through industry cycles, and mitigants.
+- Summarize history, operations, products or services, and market context only where supported.
+- Describe the financial and operating information supplied.
+- Identify risks, mitigants, and missing evidence without assumptions.
 - Concluding Underwriter Verification Prompt.""",
 
-    "management_capability": """Draft the "Management Capability & Governance" section for dealer "{dealer_name}".
-Executive Leadership:
+    "management_capability": """Draft the "Management Capability & Governance" section for business "{dealer_name}".
+Management Information:
 {context_data_json}
 
 Include:
-- Combined automotive management tenure of key directors.
-- Governance record at Companies House (annual filings, clean statutory history).
-- Succession planning and absence of disqualifications/adverse records.
+- Summarize management and governance evidence supplied.
+- Identify missing information or verification needed; do not infer clean records.
 - Concluding Underwriter Verification Prompt.""",
 
-    "conduct_reputation": """Draft the "Conduct, CRA & Market Reputation" section for dealer "{dealer_name}".
-Screening & CRA Profile:
+    "conduct_reputation": """Draft the "Conduct, Risk & Reputation" section for business "{dealer_name}".
+Risk and Screening Information:
 {context_data_json}
 
 Include:
-- Commercial CRA score, delinquency probability, and CCJ search status.
-- Consumer Duty (FCA Principle 12) compliance framework and customer satisfaction scores.
+- Summarize only the risk and screening evidence supplied.
+- Identify unresolved findings and required human review.
 - Concluding Underwriter Verification Prompt.""",
 
-    "security_structure": """Draft the "Security Structure & Facility Terms" section for dealer "{dealer_name}".
-Facility Request & Collateral:
+    "security_structure": """Draft the "Security Structure & Facility Terms" section for business "{dealer_name}".
+Facility Request and Security:
 {context_data_json}
 
 Include:
-- Facility structure (£ amount, revolving nature, margin over SONIA).
-- Primary security: First Ranking Debenture (fixed vehicle charge + floating charge).
-- Supporting guarantees (Personal Guarantees, subordination deeds, asset backing).
-- Apak wholesale title retention and stock audit cadence.
+- Describe the proposed facility and security only when included in the supplied context.
+- Flag terms, valuations, or legal evidence requiring human review.
 - Concluding Underwriter Verification Prompt.""",
 
-    "esg_sustainability": """Draft the "ESG & Green Transition Assessment" section for dealer "{dealer_name}".
-Sustainability Metrics:
+    "esg_sustainability": """Draft the "ESG & Sustainability Assessment" section for business "{dealer_name}".
+Sustainability Information:
 {context_data_json}
 
 Include:
-- EV / PHEV fleet sales transition trajectory.
-- Showroom energy efficiency (Solar PV, smart charging infrastructure).
-- Compliance with UK battery disposal and automotive environmental directives.
+- Summarize only sustainability information provided.
+- Identify relevant evidence gaps without assuming sector-specific requirements.
 - Concluding Underwriter Verification Prompt."""
 }

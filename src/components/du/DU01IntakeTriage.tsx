@@ -24,10 +24,10 @@ import {
 import { FCABoundaryDrawer } from '../FCABoundaryDrawer';
 
 const statutoryCategories: { type: RequestCategory; label: string; desc: string }[] = [
-  { type: 'NEW_RELATIONSHIP', label: '1. New Relationship', desc: 'Onboarding a completely new dealer group to the lending platform.' },
-  { type: 'NEW_FRANCHISE', label: '2. New Franchise', desc: 'Existing or new dealer onboarding an additional vehicle OEM brand franchise.' },
+  { type: 'NEW_RELATIONSHIP', label: '1. New Relationship', desc: 'Onboarding a new business customer to the lending platform.' },
+  { type: 'NEW_FRANCHISE', label: '2. New Franchise', desc: 'An existing or new customer requests an additional franchise or business line.' },
   { type: 'INCREASED_BORROWING', label: '3. Increased Borrowing', desc: 'Facility limit uplift across wholesale stocking or term lines.' },
-  { type: 'ACQUISITION', label: '4. Acquisition', desc: 'Funding dealer acquisition of peer retail dealership or showroom real estate.' },
+  { type: 'ACQUISITION', label: '4. Acquisition', desc: 'Funding a business acquisition or commercial property purchase.' },
   { type: 'DISPOSAL', label: '5. Disposal', desc: 'Re-evaluating covenants upon sale or hive-off of trading sites.' },
   { type: 'DIRECTOR_SHAREHOLDER_CHANGE', label: '6. Director / Shareholder Change', desc: 'Material change in equity ownership, PSCs, or executive officers.' },
   { type: 'PERIODIC_REVIEW', label: '7. Periodic Review', desc: 'Scheduled annual or risk-cadence comprehensive credit reaffirmation.' },
@@ -181,7 +181,7 @@ export const DU01IntakeTriage: React.FC = () => {
               <div>
                 <span className="text-slate-400 block text-[11px] mb-0.5">Inbound Channel Payload</span>
                 <p className="text-slate-300 bg-slate-800/40 p-2.5 rounded border border-slate-800 text-[11px] leading-relaxed">
-                  Referral received via Stellantis OEM Financial Services Partner Portal. Includes signed dealer request letter, credit line application form, and preliminary vehicle inventory schedule.
+                  Customer-provided referral details and documents are recorded in the evidence workflow. No referral document has been attached to this case record.
                 </p>
               </div>
             </div>
@@ -195,7 +195,7 @@ export const DU01IntakeTriage: React.FC = () => {
             </div>
 
             <p className="text-[11px] text-slate-400">
-              Queries master dealer registry to detect open or recent cases for legal entity ({activeCase.dealerProfile.registeredNumber}).
+              Duplicate-check service status is not configured. Confirm the registration number against the bank&apos;s approved master-data source.
             </p>
 
             {activeCase.duplicateAlert.hasConflict ? (

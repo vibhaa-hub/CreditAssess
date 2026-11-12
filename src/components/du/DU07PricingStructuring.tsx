@@ -173,9 +173,9 @@ export const DU07PricingStructuring: React.FC = () => {
 
             {/* Curtailment Schedule (REQ-056) */}
             <div className="pt-2 border-t border-slate-800 space-y-1">
-              <span className="font-semibold text-white block">Stock Curtailment Schedule & Covenants</span>
+              <span className="font-semibold text-white block">Repayment Schedule & Covenants</span>
               <p className="text-[11px] text-slate-300 bg-slate-800/50 p-2.5 rounded border border-slate-700/60 leading-relaxed">
-                {activeCase.facilityRequest.curtailmentSchedule} | Bi-monthly physical floorplan audits by Auxiga Smart3. Minimum quarterly vehicle sales turn of 80 units.
+                {activeCase.facilityRequest.curtailmentSchedule || 'No repayment schedule or covenant terms have been entered.'}
               </p>
             </div>
 
@@ -283,7 +283,7 @@ export const DU07PricingStructuring: React.FC = () => {
                     type="text"
                     value={conditionsInput}
                     onChange={(e) => setConditionsInput(e.target.value)}
-                    placeholder="e.g. Subject to quarterly floorplan audit and minimum unit turn..."
+                    placeholder="Enter proposed conditions or commercial stipulations"
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white text-xs"
                   />
                 </div>

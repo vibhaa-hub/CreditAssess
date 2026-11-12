@@ -21,9 +21,10 @@ import {
   QualitativeNote,
   NarrativeSection,
   FacilityRequest,
+  PeriodFinancials,
 } from '../types/ast';
 import { emptyCase } from '../data/emptyCase';
-import { calculateEffortTelemetry } from '../utils/calculations';
+import { calculateEffortTelemetry, financialSourceFields, recalculateFinancialPeriod } from '../utils/calculations';
 import { evaluateCompletenessGate, getRequirementsForCaseType } from '../data/decisionTables';
 
 interface CreditAssessmentContextType {
@@ -46,9 +47,10 @@ interface CreditAssessmentContextType {
   selectCase: (caseId: string) => void;
   // DU-01 Actions
   updateCaseClassification: (primary: RequestCategory, affectedLines: LendingLine[]) => void;
+  updateDealerProfile: (updates: Partial<CreditCase['dealerProfile']>) => void;
   assignCaseOwner: (ownerName: string, role: UserRole) => void;
   // DU-02 Actions
-  toggleChecklistItem: (itemId: string) => void;
+  recordRequirementEvidence: (itemId: string, evidenceReference: string, provider: string) => void;
   addInformationRequest: (itemCode: string, description: string, recipient: string, dueDate: string) => void;
   closeInformationRequest: (requestId: string, rationale: string) => void;
   addQualitativeNote: (note: Omit<QualitativeNote, 'id' | 'timestamp' | 'authorId' | 'authorRole'>) => void;
@@ -60,7 +62,12 @@ interface CreditAssessmentContextType {
   escalateToMLRO: (hitId: string, notes: string) => void;
   recordCRA: (craRating: CRARating, rationale: string) => void;
   // DU-05 Actions
-  updateFinancialCell: (periodIndex: number, field: string, value: number) => void;
+  updateFinancialCell: (periodIndex: number, field: string, value: number | undefined) => void;
+  updateFinancialPeriodMetadata: (
+    periodIndex: number,
+    metadata: Partial<Pick<PeriodFinancials, 'periodLabel' | 'periodEndDate' | 'isAudited'>>
+  ) => void;
+  addFinancialPeriod: () => void;
   // DU-06 Actions
   reviewNarrativeSection: (sectionId: string, decision: 'ACCEPTED' | 'AMENDED' | 'REJECTED', amendedText?: string) => void;
   // DU-07 Actions
@@ -78,8 +85,6 @@ interface CreditAssessmentContextType {
   enableOperationalFunding: () => void;
   // DU-10 Actions
   triggerLifecycleEvent: (eventType: string) => void;
-  // DU-11 Actions
-  refreshPassportItem: (itemType: string) => void;
   // DU-12 Actions
   recordExceptionOverride: (exceptionType: string, reason: string) => void;
 }
@@ -359,6 +364,17 @@ export const CreditAssessmentProvider: React.FC<{ children: React.ReactNode }> =
     [updateActiveCase, appendAudit]
   );
 
+  const updateDealerProfile = useCallback(
+    (updates: Partial<CreditCase['dealerProfile']>) => {
+      updateActiveCase((prev) => ({
+        ...prev,
+        dealerProfile: { ...prev.dealerProfile, ...updates },
+      }));
+      appendAudit('UpdateCustomerSuppliedBusinessDetails', 'DU-02 DealerInformationGatheringUnit', 'Updated business identity information supplied for this case');
+    },
+    [updateActiveCase, appendAudit]
+  );
+
   const assignCaseOwner = useCallback(
     (ownerName: string, role: UserRole) => {
       updateActiveCase((prev) => ({
@@ -376,17 +392,31 @@ export const CreditAssessmentProvider: React.FC<{ children: React.ReactNode }> =
   );
 
   // DU-02 Actions
-  const toggleChecklistItem = useCallback(
-    (itemId: string) => {
+  const recordRequirementEvidence = useCallback(
+    (itemId: string, evidenceReference: string, provider: string) => {
+      if (!evidenceReference.trim() || !provider.trim()) {
+        throw new Error('An evidence reference and source/provider are required.');
+      }
       updateActiveCase((prev) => ({
         ...prev,
         requirementChecklist: prev.requirementChecklist.map((item) =>
           item.id === itemId
-            ? { ...item, satisfied: !item.satisfied, effectiveDate: new Date().toISOString().split('T')[0] }
+            ? {
+                ...item,
+                satisfied: true,
+                provenanceSource: evidenceReference.trim(),
+                provider: provider.trim(),
+                receivedDate: new Date().toISOString().split('T')[0],
+                isStale: false,
+              }
             : item
         ),
       }));
-      appendAudit('EvaluateProvenanceAndGapAnalysis', 'DU-02 DealerInformationGatheringUnit', `Toggled checklist status for ${itemId}`);
+      appendAudit(
+        'RecordRequirementEvidence',
+        'DU-02 DealerInformationGatheringUnit',
+        `Recorded evidence reference for ${itemId}: ${evidenceReference.trim()} (source/provider: ${provider.trim()})`
+      );
     },
     [updateActiveCase, appendAudit]
   );
@@ -554,24 +584,84 @@ export const CreditAssessmentProvider: React.FC<{ children: React.ReactNode }> =
 
   // DU-05 Actions
   const updateFinancialCell = useCallback(
-    (periodIndex: number, field: string, value: number) => {
+    (periodIndex: number, field: string, value: number | undefined) => {
       updateActiveCase((prev) => {
         const updatedPeriods = [...prev.financialPeriods];
-        const target = { ...updatedPeriods[periodIndex], [field]: value };
-        // recalculate basic subtotals if turnover/costOfSales changed
-        if (field === 'turnover' || field === 'costOfSales') {
-          target.grossProfit = target.turnover - target.costOfSales;
-          target.ebit = target.grossProfit - target.operatingExpenses;
-          target.profitBeforeTax = target.ebit - target.interestCharge;
-          target.netProfit = target.profitBeforeTax - target.tax;
-        }
-        updatedPeriods[periodIndex] = target;
+        const period = updatedPeriods[periodIndex];
+        if (!period) return prev;
+        const enteredFields = new Set(period.enteredFields ?? financialSourceFields);
+        if (value === undefined) enteredFields.delete(field);
+        else enteredFields.add(field);
+        updatedPeriods[periodIndex] = recalculateFinancialPeriod({
+          ...period,
+          [field]: value ?? 0,
+          enteredFields: [...enteredFields],
+        });
         return { ...prev, financialPeriods: updatedPeriods };
       });
       appendAudit('NormaliseFinancialStatements', 'DU-05 FinancialSpreadingAnalysisUnit', `Updated financial spreading field ${field} in period ${periodIndex}`);
     },
     [updateActiveCase, appendAudit]
   );
+
+  const updateFinancialPeriodMetadata = useCallback(
+    (
+      periodIndex: number,
+      metadata: Partial<Pick<PeriodFinancials, 'periodLabel' | 'periodEndDate' | 'isAudited'>>
+    ) => {
+      updateActiveCase((prev) => ({
+        ...prev,
+        financialPeriods: prev.financialPeriods.map((period, index) =>
+          index === periodIndex ? { ...period, ...metadata } : period
+        ),
+      }));
+      appendAudit('UpdateFinancialPeriodMetadata', 'DU-05 FinancialSpreadingAnalysisUnit', `Updated period metadata for period ${periodIndex}`);
+    },
+    [updateActiveCase, appendAudit]
+  );
+
+  const addFinancialPeriod = useCallback(() => {
+    updateActiveCase((prev) => {
+      const period: PeriodFinancials = {
+        periodLabel: '',
+        periodEndDate: '',
+        isAudited: false,
+        currency: 'GBP',
+        turnover: 0,
+        costOfSales: 0,
+        grossProfit: 0,
+        operatingExpenses: 0,
+        ebit: 0,
+        interestCharge: 0,
+        profitBeforeTax: 0,
+        tax: 0,
+        netProfit: 0,
+        currentAssets: 0,
+        inventory: 0,
+        tradeDebtors: 0,
+        cashAndEquivalents: 0,
+        totalAssets: 0,
+        currentLiabilities: 0,
+        tradeCreditors: 0,
+        shortTermBorrowings: 0,
+        longTermBorrowings: 0,
+        totalBorrowings: 0,
+        totalLiabilities: 0,
+        netAssets: 0,
+        shareholdersEquity: 0,
+        tangibleEquity: 0,
+        openingCash: 0,
+        operatingCashflow: 0,
+        investingCashflow: 0,
+        financingCashflow: 0,
+        closingCash: 0,
+        cashflowDifference: 0,
+        enteredFields: [],
+      };
+      return { ...prev, financialPeriods: [...prev.financialPeriods, period] };
+    });
+    appendAudit('AddFinancialPeriod', 'DU-05 FinancialSpreadingAnalysisUnit', 'Added a financial period for source-data entry');
+  }, [updateActiveCase, appendAudit]);
 
   // DU-06 Actions
   const reviewNarrativeSection = useCallback(
@@ -842,30 +932,6 @@ export const CreditAssessmentProvider: React.FC<{ children: React.ReactNode }> =
     [updateActiveCase, appendAudit]
   );
 
-  // DU-11 Actions
-  const refreshPassportItem = useCallback(
-    (itemType: string) => {
-      const today = new Date().toISOString().split('T')[0];
-      updateActiveCase((prev) => ({
-        ...prev,
-        masterPassport: {
-          ...prev.masterPassport,
-          reusablePassportItems: prev.masterPassport.reusablePassportItems.map((item) =>
-            item.itemType === itemType
-              ? { ...item, verifiedDate: today, ageDays: 0, isStale: false }
-              : item
-          ),
-        },
-      }));
-      appendAudit(
-        'CurateCrossLendingLineDataReuse',
-        'DU-11 MasterDataReuseUnit',
-        `Refreshed external provider record for ${itemType} across shared Master Passport (REQ-079 / BR-E06)`
-      );
-    },
-    [updateActiveCase, appendAudit]
-  );
-
   // DU-12 Actions
   const recordExceptionOverride = useCallback(
     (_exceptionType: string, _reason: string) => {
@@ -895,8 +961,9 @@ export const CreditAssessmentProvider: React.FC<{ children: React.ReactNode }> =
         telemetry,
         selectCase: setActiveCaseId,
         updateCaseClassification,
+        updateDealerProfile,
         assignCaseOwner,
-        toggleChecklistItem,
+        recordRequirementEvidence,
         addInformationRequest,
         closeInformationRequest,
         addQualitativeNote,
@@ -906,6 +973,8 @@ export const CreditAssessmentProvider: React.FC<{ children: React.ReactNode }> =
         escalateToMLRO,
         recordCRA,
         updateFinancialCell,
+        updateFinancialPeriodMetadata,
+        addFinancialPeriod,
         reviewNarrativeSection,
         updateFacilityRequest,
         authorizePricing,
@@ -918,7 +987,6 @@ export const CreditAssessmentProvider: React.FC<{ children: React.ReactNode }> =
         satisfyConditionPrecedent,
         enableOperationalFunding,
         triggerLifecycleEvent,
-        refreshPassportItem,
         recordExceptionOverride,
       }}
     >

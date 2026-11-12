@@ -10,10 +10,13 @@ ApexCredit is a credit-assessment workflow application. The repository currently
 - Server-side role checks for case creation and sensitive changes, using the configured OIDC role claim.
 - Append-only, per-case SHA-256 chained audit events.
 - JSON case import with API-side schema checks.
+- New SME/business case creation from customer-supplied legal identity details.
+- DU-02 accepts uploaded UTF-8 CSV files for bounded, source-preserving extraction; extraction is in-memory only, is not saved as case evidence, and does not verify or semantically map the contents.
+- DU-05 accepts manually entered financial statement figures, persists them to the case, and recalculates derived totals and ratios as inputs change. Missing inputs are shown as unavailable rather than treated as zero-valued results.
 - Explicit integration readiness status. A status of `CONFIGURED_UNVERIFIED` means only that environment variables exist; no external provider has been contacted.
 - AI drafting endpoints return an error when Gemini is unavailable instead of substituting fabricated credit or screening commentary.
 
-Experimental risk scoring, policy retrieval, rule evaluation, ADK sessions, and HITL endpoints are disabled because their bundled implementations are not production-validated. Unused experimental modules remain in the repository but are not exposed through the worker allowlist or enabled UI. Provider integrations, document retention, file storage, comprehensive data validation, organization-specific authorization, operational monitoring, backup/restore, and compliance approval remain required before production use.
+No risk-scoring model is included. Policy retrieval, the experimental Python rule engine, ADK sessions, and HITL endpoints are disabled because they are not production-validated. The frontend calculation rules derive financial subtotals and ratios only; they are not a bank policy engine, risk model, or credit decision. Provider integrations, document retention, file storage, comprehensive data validation, organization-specific authorization, operational monitoring, backup/restore, and compliance approval remain required before production use.
 
 ## Python worker and agents
 
@@ -23,7 +26,7 @@ The Express API starts the Python worker as a bounded subprocess. Python depende
 - `evaluate-all`: read-only analysis of a case loaded from PostgreSQL by the authenticated API. It does not write decisions or invoke external providers.
 - `docling-extract`: despite the legacy command name, currently parses uploaded UTF-8 CSV bytes only. It enforces 2 MB, 2,000-row, 100-column, and 20,000-character-per-cell limits. It returns source-preserving cells and a SHA-256 content hash; it does not persist the file, verify it, map financial meaning, reconcile statements, or support PDF/OCR/Excel/iXBRL.
 
-The available agents validate supplied intake values, calculate a limited set of financial ratios only when required inputs are present, summarize case-record screening flags without claiming live checks, and report completeness without transmitting a submission. Their output is analytical-only and is not an approval or credit decision. Live screening, document storage/parsing, credit submission, approved policy/rules, persisted human attestations, and a validated risk model are not configured.
+The available agents validate supplied intake values, calculate a limited set of financial ratios only when required inputs are present, summarize case-record screening flags without claiming live checks, and report completeness without transmitting a submission. Trends requiring multiple periods and exposure totals without supplied exposure data remain unavailable rather than being represented as zero. No policy thresholds or retrieval corpus are treated as bank-approved defaults. Agent output is analytical-only and is not an approval or credit decision. Live screening, document storage/parsing, credit submission, approved policy/rules, persisted human attestations, and a validated risk model are not configured.
 
 Run the Python boundary tests from the project root:
 
@@ -48,13 +51,13 @@ Requirements: Node.js 20+, Python 3, and a PostgreSQL database reachable from th
    npm run dev
    ```
 
-5. Open `http://localhost:3000`. If the database has no cases, the workspace offers JSON import.
+5. Open `http://localhost:3000`. If the database has no cases, create an SME case from supplied identity details or import an existing case JSON record.
 
 For production, set `NODE_ENV=production`, configure an OIDC issuer/client/callback URL and a strong `SESSION_SECRET`, set the `roles` claim (or `OIDC_ROLE_CLAIM`) to ApexCredit role names, and leave the local auth bypass unset. Use a PostgreSQL connection configured with `sslmode=verify-full`. The server will refuse to start if database, migration, or OIDC configuration is missing.
 
 ## Case import format
 
-Import accepts one complete case object matching the `CreditCase` model in `src/types/ast.ts`. The object must include `caseId`, dealer identity, classification, checklist and verification state, screening results, financials, narratives, pricing, snapshots, underwriting queries/decision, fulfillment state, review schedule, and master-passport data. The API rejects duplicate case IDs and malformed required fields.
+Import accepts one complete case object matching the `CreditCase` model in `src/types/ast.ts`. The object must include `caseId`, business identity, classification, checklist and verification state, screening results, financials, narratives, pricing, snapshots, underwriting queries/decision, fulfillment state, review schedule, and master-passport data. The API rejects duplicate case IDs and malformed required fields. The new-case form creates an intake record from business name and registration number; additional evidence and assessment values must still be supplied and reviewed.
 
 Case records are persisted to PostgreSQL. Updates include an expected version; conflicting edits are rejected with HTTP 409 and the UI reloads the stored version. Case content may contain sensitive personal and financial data: use only an approved development dataset until the organization has approved access, retention, encryption, residency, and provider arrangements.
 
@@ -69,3 +72,5 @@ The API derives the audit actor from the verified OIDC subject and checks roles 
 ## Integration boundary
 
 No Companies House, bureau, sanctions/PEP, document-storage, or credit-gateway provider has been selected or supplied. Corresponding environment-variable names are placeholders, not working integrations. Do not configure production credentials until the vendor, API contract, lawful basis, consent flow, data-processing terms, and failure handling have been reviewed. Gemini drafting is optional and is not a decision engine; configured requests send the supplied case context to Google, and this repository does not establish an approved data-processing or retention arrangement. Do not send customer data until that use has been explicitly approved.
+
+The current upload path is not a bank-grade document-management workflow: it supports CSV extraction only, does not retain the uploaded file, and does not support PDF, Excel, scanned images, or iXBRL. Do not upload real customer documents until encrypted document storage, malware scanning, retention/deletion, access controls, and an approved parser/provider have been implemented and approved.

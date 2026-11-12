@@ -181,7 +181,7 @@ export const DU09PostApprovalFulfillment: React.FC = () => {
             </div>
 
             <p className="text-[11px] text-slate-400">
-              Policy Rule BR-P08: Every underwriting condition of approval must be satisfied with verified evidentiary documentation before vehicle stocking drawdowns can proceed.
+              Each underwriting condition must be supported by reviewed evidence before the facility is drawn.
             </p>
 
             <div className="space-y-2.5">

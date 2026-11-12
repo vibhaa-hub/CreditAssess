@@ -11,6 +11,7 @@ from agents.financial_analyst_agent import FinancialAnalystAgent
 from agents.gateway_submission_agent import CreditSubmissionGatewayAgent
 from agents.intake_triage_agent import IntakeTriageAgent
 from doc_extractor import DoclingExtractionEngine, DocumentExtractionError
+from rag_engine import ApexRAGEngine, KnowledgeChunk
 
 
 class CsvExtractionTests(unittest.TestCase):
@@ -42,6 +43,21 @@ class CsvExtractionTests(unittest.TestCase):
 
 
 class AgentBoundaryTests(unittest.TestCase):
+    def test_retrieval_has_no_bundled_corpus_and_scores_supplied_sources(self):
+        self.assertEqual(ApexRAGEngine().retrieve("credit policy"), [])
+        chunk = KnowledgeChunk(
+            chunk_id="approved-1",
+            source_corpus="BANK_POLICY",
+            title="Bank policy",
+            section_ref="1",
+            text="Approved conditions",
+            provenance_citation="policy.pdf page 1",
+            tags=[],
+        )
+        result = ApexRAGEngine([chunk]).retrieve("bank policy")
+        self.assertEqual(result[0]["citation"], "policy.pdf page 1")
+        self.assertEqual(result[0]["relevance_score"], 0.5)
+
     def test_intake_does_not_invent_owner_or_checklist(self):
         result = IntakeTriageAgent().run({
             "raw_incoming_message": {
@@ -90,6 +106,39 @@ class AgentBoundaryTests(unittest.TestCase):
         self.assertEqual(agent.calculate_gearing(10, 0)["value"], "not meaningful")
         self.assertEqual(agent.calculate_current_ratio(10, 0)["value"], "not calculable")
         self.assertIsNone(agent.calculate_interest_cover(10, 0)["value"])
+
+    def test_single_period_and_missing_exposure_are_not_reported_as_zero(self):
+        period = {
+            "turnover": 100,
+            "costOfSales": 60,
+            "ebit": 10,
+            "interestCharge": 2,
+            "netProfit": 8,
+            "totalBorrowings": 20,
+            "netAssets": 40,
+            "currentAssets": 25,
+            "currentLiabilities": 10,
+            "inventory": 12,
+            "openingCash": 1,
+            "operatingCashflow": 2,
+            "investingCashflow": -1,
+            "financingCashflow": 0,
+            "closingCash": 2,
+        }
+        result = FinancialAnalystAgent().run({
+            "financial_periods": [period],
+            "cross_line_exposures": [],
+        })
+
+        self.assertIsNone(result["revenue_yoy_pct"])
+        self.assertIsNone(result["stock_days"])
+        self.assertEqual(result["exposure_data_status"], "NOT_SUPPLIED")
+        self.assertIsNone(result["total_facility_limit"])
+
+    def test_facility_headroom_preserves_over_limit_exposure(self):
+        result = FinancialAnalystAgent().calculate_facility_utilization(150, 100)
+        self.assertEqual(result["headroom"], -50)
+        self.assertEqual(result["utilization_pct"], 150)
 
     def test_cli_allowlist_excludes_unavailable_prototype_workflows(self):
         self.assertEqual(

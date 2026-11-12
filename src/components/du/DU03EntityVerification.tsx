@@ -61,7 +61,7 @@ export const DU03EntityVerification: React.FC = () => {
             <span className="text-xs text-slate-400 font-mono">Domain: DOM-02 Due Diligence</span>
           </div>
           <p className="text-xs text-slate-400">
-            Reconciles dealer entity details against official Companies House records (REQ-020), enforces 100% UBO equity tree reconciliation (BR-D10), and graph-traverses cross-dealer affiliations (REQ-023).
+            Review business identity, ownership, and related-party information using submitted records. No company-registry or external affiliation service is configured.
           </p>
         </div>
 
@@ -97,36 +97,36 @@ export const DU03EntityVerification: React.FC = () => {
         deterministicRules={[
           {
             code: 'REQ-020',
-            name: 'Companies House Statutory Reconciliation',
-            status: 'PASS',
-            fcaCitation: 'Companies Act 2006 / MLR 2017',
-            description: 'Company registration number, registered office, and active filing status must match Companies House API exactly.',
+            name: 'Business Registry Reconciliation',
+            status: 'PENDING',
+            fcaCitation: 'Manual review required',
+            description: 'Compare registration details and filing status with the relevant registry; no registry integration is configured.',
           },
           {
             code: 'BR-D10',
             name: '100% Equity UBO Tree Reconciliation',
-            status: 'PASS',
+            status: is100PctReconciled ? 'PASS' : 'PENDING',
             fcaCitation: 'MLR 2017 Regulation 5',
             description: 'Shareholding allocation must mathematically sum to exactly 100.0%. All Persons with Significant Control (PSC >=25%) identified.',
           },
           {
             code: 'REQ-023',
-            name: 'Connected Dealer Affiliation Graph',
-            status: 'PASS',
-            fcaCitation: 'PRA Credit Concentration Rules',
-            description: 'Common directorships and parent guarantees are graph-traversed to assess multi-dealer aggregate exposure.',
+            name: 'Related-Party and Group Review',
+            status: 'PENDING',
+            fcaCitation: 'Manual review required',
+            description: 'Review declared related parties, common ownership, guarantees, and group exposures; no external affiliation service is configured.',
           },
         ]}
       />
 
       {/* Grid: 2 columns */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left: Companies House Reconciliation (REQ-020, REQ-021, BR-D01) */}
+        {/* Left: Business Registry Reconciliation (REQ-020, REQ-021, BR-D01) */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-slate-800">
             <div className="flex items-center gap-2">
               <Building2 className="w-4 h-4 text-cyan-400" />
-              <h2 className="text-sm font-bold text-white">Companies House Registry Reconciliation</h2>
+              <h2 className="text-sm font-bold text-white">Business Registry Reconciliation</h2>
             </div>
             <span className="text-[10px] font-mono bg-cyan-950 text-cyan-300 border border-cyan-800 px-2 py-0.5 rounded">
               Live API Connected (LR-05)
@@ -156,11 +156,11 @@ export const DU03EntityVerification: React.FC = () => {
 
                 <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
                   <div>
-                    <span className="text-slate-400 block text-[10px]">Dealer Supplied:</span>
+                    <span className="text-slate-400 block text-[10px]">Customer Supplied:</span>
                     <span className="text-slate-200">{disc.dealerSuppliedValue}</span>
                   </div>
                   <div>
-                    <span className="text-slate-400 block text-[10px]">Companies House Official:</span>
+                    <span className="text-slate-400 block text-[10px]">Registry Record:</span>
                     <span className="text-cyan-300 font-mono">{disc.registryValue}</span>
                   </div>
                 </div>
@@ -228,7 +228,7 @@ export const DU03EntityVerification: React.FC = () => {
           </div>
         </div>
 
-        {/* Right: Ownership Structure & Connected Dealer Graph (REQ-022, REQ-023, BR-D10, BR-D11) */}
+        {/* Right: Ownership Structure & Connected Business Graph (REQ-022, REQ-023, BR-D10, BR-D11) */}
         <div className="space-y-6">
           {/* 100% Equity Tree Reconciliation */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
@@ -278,11 +278,11 @@ export const DU03EntityVerification: React.FC = () => {
               ))}
             </div>
 
-            {/* Connected Dealer Affiliations Graph (REQ-023, BR-D11) */}
+            {/* Connected Business Affiliations (REQ-023, BR-D11) */}
             <div className="pt-3 border-t border-slate-800 space-y-2">
               <div className="flex items-center gap-2 text-xs font-semibold text-amber-300">
                 <Layers className="w-3.5 h-3.5" />
-                <span>Connected Dealer Affiliations (REQ-023 / BR-D11)</span>
+                <span>Connected Business Affiliations (REQ-023 / BR-D11)</span>
               </div>
               {activeCase.connectedDealers.length > 0 ? (
                 activeCase.connectedDealers.map((link, idx) => (
@@ -306,7 +306,7 @@ export const DU03EntityVerification: React.FC = () => {
                 ))
               ) : (
                 <div className="text-slate-400 text-xs italic">
-                  Zero connected dealer or shared officer cross-holdings detected in master registry.
+                  No related businesses or shared officers are recorded in this case. No external registry check has been performed.
                 </div>
               )}
             </div>

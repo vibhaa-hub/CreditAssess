@@ -227,7 +227,7 @@ class GoogleADKOrchestrator:
                     name="Intake Requirement Set Confirmation",
                     stage_du="DU-01",
                     fca_rule="Control Gate IBVC-01-G1",
-                    status=HITLStatus.APPROVED,
+                    status=HITLStatus.WAITING_FOR_HUMAN,
                     required_role="ACCOUNT_MANAGER",
                     attestation_prompt="Confirm statutory request category and assigned case owner."
                 ),
@@ -254,7 +254,7 @@ class GoogleADKOrchestrator:
                     name="Four-Eyes Pricing Authorization",
                     stage_du="DU-07",
                     fca_rule="FCA SYSC 4.3.1R / Rule BR-E02",
-                    status=HITLStatus.APPROVED,
+                    status=HITLStatus.WAITING_FOR_HUMAN,
                     required_role="COMMERCIAL_MANAGER",
                     attestation_prompt="Counter-sign facility margin and collateral valuation haircuts."
                 ),
@@ -278,8 +278,7 @@ class GoogleADKOrchestrator:
     def run_full_pipeline(self, session_id: str) -> Dict[str, Any]:
         session = self.sessions.get(session_id)
         if not session:
-            session = self.create_session("CASE-APX-2026-0891", "Apex Motor Group Limited")
-            session_id = session.session_id
+            raise ValueError("A persisted session created from a supplied case is required.")
 
         pipeline_results = []
         for agent_key, agent in self.agents.items():

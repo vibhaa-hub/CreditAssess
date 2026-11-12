@@ -5,37 +5,21 @@
  * [DU-11] MasterDataReuseUnit (Deployable Unit 11 / P-11 | Domain: DOM-06 Shared Master Data Service)
  */
 
-import React, { useState } from 'react';
 import { useCreditAssessment } from '../../context/CreditAssessmentContext';
 import { evaluateInformationAge } from '../../utils/calculations';
 import {
   Database,
-  RefreshCw,
   FileCheck2,
   AlertTriangle,
   FileText,
-  Clock,
   ArrowRight,
-  ShieldCheck,
-  CheckCircle2,
-  Upload,
 } from 'lucide-react';
 
 export const DU11MasterDataReuse: React.FC = () => {
-  const { activeCase, refreshPassportItem, setActiveDU } = useCreditAssessment();
-
-  const [manualText, setManualText] = useState('');
-  const [manualDocName, setManualDocName] = useState('Corrupted_Scanned_Accounts_FY2023.pdf');
-  const [transcriptionDone, setTranscriptionDone] = useState(false);
+  const { activeCase, setActiveDU } = useCreditAssessment();
 
   const passport = activeCase.masterPassport;
   const today = new Date().toISOString().split('T')[0];
-
-  const handleManualTranscribe = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!manualText.trim()) return;
-    setTranscriptionDone(true);
-  };
 
   return (
     <div className="space-y-6">
@@ -50,14 +34,14 @@ export const DU11MasterDataReuse: React.FC = () => {
             <span className="text-xs text-slate-400 font-mono">Domain: DOM-06 Master Data Service</span>
           </div>
           <p className="text-xs text-slate-400">
-            Canonical Master Dealer Identity (REQ-080 / PR-01), Cross-Line Reusable Entity Passport (REQ-079 / BR-E06), DT-5 Staleness & Expiry Evaluator (CALC-014), and Manual Transcription Fallback (REQ-083 / BR-U05).
+            Review business identity and previously supplied information. No external master-data service or automatic reuse integration is configured.
           </p>
         </div>
 
-        {/* Master Dealer ID Badge */}
+        {/* Case Identity Badge */}
         <div className="px-4 py-2 bg-slate-950/80 border border-slate-800 rounded-xl flex items-center gap-2 text-xs">
           <Database className="w-4 h-4 text-purple-400" />
-          <span className="text-slate-400">Canonical Dealer ID:</span>
+          <span className="text-slate-400">Case Business ID:</span>
           <span className="font-bold text-purple-300 font-mono">{passport.canonicalDealerId}</span>
         </div>
       </div>
@@ -77,7 +61,7 @@ export const DU11MasterDataReuse: React.FC = () => {
           </div>
 
           <p className="text-[11px] text-slate-400">
-            Policy Rule BR-E06: Information already held and within policy validity is automatically reused across Franchise, Wholesale, and Fleet channels without re-requesting from the dealer.
+            Review the source and validity of information in this case before reusing it. The system does not retrieve or automatically reuse information across products.
           </p>
 
           <div className="space-y-3">
@@ -109,13 +93,7 @@ export const DU11MasterDataReuse: React.FC = () => {
 
                   <div className="pt-2 border-t border-slate-700/60 flex items-center justify-between text-[11px]">
                     <span className="text-slate-400 font-mono text-[10px]">Verified: {item.verifiedDate}</span>
-                    <button
-                      onClick={() => refreshPassportItem(item.itemType)}
-                      className="flex items-center gap-1 text-[11px] text-cyan-400 hover:underline"
-                    >
-                      <RefreshCw className="w-3 h-3" />
-                      <span>Refresh External Data</span>
-                    </button>
+                    <span className="text-[10px] text-amber-300">External refresh not configured</span>
                   </div>
                 </div>
               );
@@ -123,58 +101,30 @@ export const DU11MasterDataReuse: React.FC = () => {
           </div>
         </div>
 
-        {/* Right: Unreadable Documents & Manual Transcription Fallback (REQ-083 / BR-U05) */}
+        {/* Right: Document handling boundary */}
         <div className="space-y-6">
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2">
                 <FileText className="w-4 h-4 text-amber-400" />
-                <h2 className="text-sm font-bold text-white">ProcessUnreadableDocumentsManualTranscription</h2>
+                <h2 className="text-sm font-bold text-white">Customer document handling</h2>
               </div>
               <span className="text-[10px] font-mono text-amber-300 bg-amber-950 px-2 py-0.5 rounded border border-amber-800">
-                REQ-083 / BR-U05
+                Service not configured
               </span>
             </div>
 
             <p className="text-[11px] text-slate-400">
-              When an automated OCR ingestion fails or an external feed is corrupted, user can record a manual transcription with mandatory attached source scan.
+              Secure document storage and OCR for PDF, Excel, scanned images, and iXBRL are not configured. CSV extraction in DU-02 is in-memory only and does not retain files or verify their contents.
             </p>
-
-            <form onSubmit={handleManualTranscribe} className="space-y-3 text-xs">
-              <div>
-                <label className="text-slate-400 block mb-1">Corrupted / Illegible Document File</label>
-                <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 font-mono text-slate-300 flex items-center justify-between">
-                  <span>{manualDocName}</span>
-                  <span className="text-red-400 text-[10px] font-bold">OCR Low Confidence (32%)</span>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-slate-400 block mb-1">Secure Manual Transcription (Key Values & Lineage)</label>
-                <textarea
-                  rows={4}
-                  value={manualText}
-                  onChange={(e) => setManualText(e.target.value)}
-                  placeholder="Enter manual transcribed balance sheet or P&L line items with auditor certification notes..."
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white focus:outline-none focus:border-cyan-500 font-mono text-[11px]"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5"
-              >
-                <Upload className="w-4 h-4" />
-                <span>Commit Manual Transcription & Attach Evidence (BR-U05)</span>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => setActiveDU(2)} className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-cyan-300">
+                Open evidence intake
               </button>
-            </form>
-
-            {transcriptionDone && (
-              <div className="p-3 bg-emerald-950/30 border border-emerald-900/60 rounded-lg text-xs text-emerald-300 flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Manual transcription verified and anchored to original scan artifact reference.</span>
-              </div>
-            )}
+              <button onClick={() => setActiveDU(5)} className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-cyan-300">
+                Enter financial figures
+              </button>
+            </div>
           </div>
 
           <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl flex justify-end">

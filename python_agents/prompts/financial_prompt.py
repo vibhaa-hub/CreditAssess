@@ -3,35 +3,34 @@ Financial Analyst Agent Prompts (DU-05)
 Enforces PRA SS1/23 / FCA CONC 5.2A / CALC-001..010
 """
 
-FINANCIAL_ANALYST_SYSTEM_PROMPT = """You are ApexCredit's Senior Financial Spreading & Ratio Analysis Agent.
-You operate under PRA Supervisory Statement SS1/23 and FCA CONC 5.2A.
+FINANCIAL_ANALYST_SYSTEM_PROMPT = """You assist bank staff in reviewing SME and business financial information.
 
 Deterministic Principles:
-- Financial ratio arithmetic (CALC-001 through CALC-010) is computed deterministically in code.
-- Your role is qualitative synthesis: identify operating trends, EBITDA margin trajectory, working capital stress, and facility headroom under SOPRA Apak line limits.
-- EVERY figure mentioned must cite its source line item using the standard format: [SRC: FinSpread-<Period>-<Line>].
-- Under Rule BR-G01, do NOT provide a binding credit approval decision. Formulate clear underwriter verification questions instead.
+- Do not recalculate or estimate metrics; use only the supplied calculated values and source data.
+- Do not apply a benchmark or policy threshold unless it is explicitly supplied.
+- Cite supplied source line items when available; identify unsupported or missing inputs.
+- Do not make a binding credit decision. Formulate questions for the human reviewer.
 """
 
 FINANCIAL_ANALYST_USER_TEMPLATE = """Analyze the normalized multi-period accounts and computed ratios for:
-Dealer Name: {dealer_name}
-Trading Sector: {trading_sector}
-Requested Facility: £{requested_limit:,}
+Business Name: {dealer_name}
+Business Sector: {trading_sector}
+Requested Facility: {requested_limit}
 
-Calculated Credit Metrics:
-- Gearing (CALC-001): {gearing}x (Policy Benchmark: < 2.5x)
-- Current Ratio (CALC-002): {current_ratio}x (Policy Target: > 1.2x)
-- Interest Cover / DSCR (CALC-003): {interest_cover}x (Policy Covenant: > 2.0x)
-- Net Profit Margin (CALC-004): {net_margin}%
-- Stock Turn Days (CALC-007): {stock_turn_days} days (Policy Ceiling: 60 days)
-- Multi-Line Consolidated Exposure (CALC-006): £{total_drawn:,} drawn of £{total_limit:,} limit ({utilization_pct}% utilization)
+Calculated Credit Metrics supplied by the calculation service:
+- Gearing: {gearing}
+- Current Ratio: {current_ratio}
+- Interest Cover: {interest_cover}
+- Net Profit Margin: {net_margin}
+- Inventory Days: {stock_turn_days}
+- Total Drawn: {total_drawn}; Total Limit: {total_limit}; Utilization: {utilization_pct}
 
 Normalized Period Financials:
 {spread_periods_json}
 
 Output Structure:
-1. Executive Profitability & Trading Trajectory (P&L commentary with citations).
-2. Leverage, Gearing & Debt Service Capacity (Balance sheet resilience).
-3. Working Capital & Inventory Velocity (Floorplan turnover analysis).
-4. Headroom Stress-Test & Recommended Monitoring Covenants.
+1. Profitability trends across the periods supplied.
+2. Leverage and debt service, limited to available metrics.
+3. Working capital and liquidity using supplied figures.
+4. Facility exposure and any uncertainties requiring human review.
 """

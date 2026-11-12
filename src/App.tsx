@@ -11,6 +11,8 @@ import { CreditAssessmentProvider, useCreditAssessment } from './context/CreditA
 import { Header } from './components/Header';
 import { ASTVisualMapModal } from './components/ASTVisualMapModal';
 import { PythonAgentConsole } from './components/PythonAgentConsole';
+import { emptyCase } from './data/emptyCase';
+import { getRequirementsForCaseType } from './data/decisionTables';
 
 import { DU01IntakeTriage } from './components/du/DU01IntakeTriage';
 import { DU02InformationGathering } from './components/du/DU02InformationGathering';
@@ -71,6 +73,10 @@ const MainContent: React.FC = () => {
   const [showPythonConsole, setShowPythonConsole] = useState(true);
   const [caseFile, setCaseFile] = useState<File | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [businessName, setBusinessName] = useState('');
+  const [registrationNumber, setRegistrationNumber] = useState('');
+  const [tradingName, setTradingName] = useState('');
+  const [businessEmail, setBusinessEmail] = useState('');
   const [integrations, setIntegrations] = useState<{ id: string; purpose: string; status: string }[]>([]);
 
   useEffect(() => {
@@ -95,6 +101,27 @@ const MainContent: React.FC = () => {
     }
   };
 
+  const handleCreateCase = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setImportError(null);
+    const newCase = structuredClone(emptyCase);
+    newCase.caseId = `SME-${Date.now()}`;
+    newCase.receiptDate = new Date().toISOString();
+    newCase.originationSource = 'BANK_REFERRAL';
+    newCase.dealerProfile.legalName = businessName.trim();
+    newCase.dealerProfile.registeredNumber = registrationNumber.trim();
+    newCase.dealerProfile.tradingName = tradingName.trim();
+    newCase.dealerProfile.contactEmail = businessEmail.trim();
+    newCase.requirementChecklist = getRequirementsForCaseType('NEW_RELATIONSHIP');
+
+    try {
+      await importCase(newCase);
+      setActiveDU(1);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Could not create the business case.');
+    }
+  };
+
   if (casesLoading) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
@@ -113,8 +140,7 @@ const MainContent: React.FC = () => {
               {casesError ? 'Case service unavailable' : 'No cases in the database'}
             </h1>
             <p className="mt-2 text-sm text-slate-400">
-              Demo cases are no longer loaded automatically. Import an existing case JSON record or connect an
-              approved source system before using the assessment workflow.
+              Start a case from business details supplied by an SME customer, then collect evidence and complete the assessment.
             </p>
           </div>
 
@@ -126,25 +152,44 @@ const MainContent: React.FC = () => {
               </button>
             </div>
           ) : (
-            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5 space-y-4">
-              <h2 className="font-semibold text-white">Import a case record</h2>
-              <p className="text-xs text-slate-400">
-                Select a JSON file containing one complete CreditCase record. The API validates required fields,
-                writes it to PostgreSQL, and records the import in the append-only audit log.
-              </p>
-              <input
-                type="file"
-                accept="application/json,.json"
-                onChange={(event) => setCaseFile(event.target.files?.[0] ?? null)}
-                className="block w-full text-sm text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-2 file:text-white"
-              />
-              <button
-                disabled={!caseFile}
-                onClick={handleCaseImport}
-                className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Import case
-              </button>
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5 space-y-5">
+              <div>
+                <h2 className="font-semibold text-white">Open a business credit case</h2>
+                <p className="mt-1 text-xs text-slate-400">
+                  Enter customer-supplied identity details. Verification, consent, documents, and financial data remain outstanding until supplied and reviewed.
+                </p>
+              </div>
+              <form onSubmit={handleCreateCase} className="grid gap-3 md:grid-cols-2">
+                <label className="text-xs text-slate-300">
+                  Registered business name *
+                  <input required maxLength={300} value={businessName} onChange={(event) => setBusinessName(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 p-2 text-white" />
+                </label>
+                <label className="text-xs text-slate-300">
+                  Company / business registration number *
+                  <input required maxLength={100} value={registrationNumber} onChange={(event) => setRegistrationNumber(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 p-2 text-white" />
+                </label>
+                <label className="text-xs text-slate-300">
+                  Trading name
+                  <input maxLength={300} value={tradingName} onChange={(event) => setTradingName(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 p-2 text-white" />
+                </label>
+                <label className="text-xs text-slate-300">
+                  Business contact email
+                  <input type="email" maxLength={300} value={businessEmail} onChange={(event) => setBusinessEmail(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 p-2 text-white" />
+                </label>
+                <button type="submit" className="w-fit rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white">
+                  Create case
+                </button>
+              </form>
+              <details className="border-t border-slate-800 pt-4">
+                <summary className="cursor-pointer text-sm font-semibold text-slate-300">Import an existing case record</summary>
+                <div className="mt-3 space-y-3">
+                  <p className="text-xs text-slate-400">Import a complete CreditCase JSON record from an approved source system.</p>
+                  <input type="file" accept="application/json,.json" onChange={(event) => setCaseFile(event.target.files?.[0] ?? null)} className="block w-full text-sm text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-2 file:text-white" />
+                  <button disabled={!caseFile} onClick={handleCaseImport} className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">
+                    Import case JSON
+                  </button>
+                </div>
+              </details>
               {importError && <p role="alert" className="text-sm text-rose-300">{importError}</p>}
             </div>
           )}

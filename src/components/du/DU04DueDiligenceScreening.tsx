@@ -162,7 +162,7 @@ export const DU04DueDiligenceScreening: React.FC = () => {
             name: 'Mandatory CRA Rating Generation',
             status: hasValidCRA ? 'PASS' : 'PENDING',
             fcaCitation: 'MLR 2017 Reg 18',
-            description: 'Every dealer must have an immutable Customer Risk Assessment (Low/Medium/High) determining lifecycle review cadence.',
+            description: 'Record a customer risk assessment and its review rationale according to the bank-approved policy.',
           },
         ]}
       />
@@ -177,7 +177,7 @@ export const DU04DueDiligenceScreening: React.FC = () => {
                 CRITICAL: MLRO Escalation Active (LR-02 / Proceeds of Crime Act 2002)
               </span>
               <p className="text-red-300 text-[11px] mt-0.5">
-                Case progression is suspended. Anti-tipping-off protocols strictly in effect. Contact Head of Compliance before communicating with dealer.
+                Case progression is suspended. Follow the bank&apos;s approved anti-tipping-off procedures and contact the designated compliance officer before communicating with the customer.
               </p>
             </div>
           </div>
@@ -216,7 +216,7 @@ export const DU04DueDiligenceScreening: React.FC = () => {
             rule: 'LR-09 Credit Broking Status',
             icon: FileCheck2,
             finding: activeCase.screeningFindings.find((f) => f.checkType === 'FCA_REGISTER'),
-            description: 'Verifies dealer permissions on the FCA Financial Services Register and disciplinary history.',
+            description: 'Review applicable regulatory permissions and disciplinary history. No regulatory-register integration is configured.',
           },
           {
             title: 'Adverse Media Review (REQ-031)',

@@ -19,49 +19,49 @@ class CreditToolRegistry:
         return [
             ToolDefinition(
                 name="classify_case_category",
-                description="Maps inbound application payload to 1 of 7 statutory categories under REQ-002.",
-                parameters_schema={"type": "object", "properties": {"dealer_type": {"type": "string"}}},
+                description="Classifies a business credit request using supplied bank policy and case details.",
+                parameters_schema={"type": "object", "properties": {"business_type": {"type": "string"}}},
                 handler="classify_case"
             ),
             ToolDefinition(
                 name="derive_dt1_checklist",
-                description="Generates mandatory documentation checklist under Decision Table DT-1.",
+                description="Identifies evidence requirements from bank policy supplied with the request.",
                 parameters_schema={"type": "object", "properties": {"category": {"type": "string"}}},
                 handler="derive_checklist"
             ),
             ToolDefinition(
                 name="compute_calcs_deterministic",
-                description="Calculates Gearing, Current Ratio, DSCR, and Stock Turn deterministically.",
+                description="Calculates supported financial metrics from supplied periods using configured rules.",
                 parameters_schema={"type": "object", "properties": {"periods": {"type": "array"}}},
                 handler="compute_ratios"
             ),
             ToolDefinition(
                 name="validate_cashflow_invariant",
-                description="Enforces CALC-007 Cashflow Discrepancy == 0.",
+                description="Reconciles supplied cash-flow figures using the applicable configured rule.",
                 parameters_schema={"type": "object", "properties": {"cashflows": {"type": "object"}}},
                 handler="validate_cashflow"
             ),
             ToolDefinition(
                 name="screen_watchlists_parallel",
-                description="Executes 5 parallel AML screening checks under SYSC 6.3.",
+                description="Prepares supplied parties for screening; no external screening provider is configured.",
                 parameters_schema={"type": "object", "properties": {"target_parties": {"type": "array"}}},
                 handler="screen_aml"
             ),
             ToolDefinition(
                 name="evaluate_dt3_disposition",
-                description="Evaluates false positive differentiation criteria under Decision Table DT-3.",
+                description="Summarizes a screening finding for human review using supplied policy and evidence.",
                 parameters_schema={"type": "object", "properties": {"hit_id": {"type": "string"}}},
                 handler="adjudicate_hit"
             ),
             ToolDefinition(
                 name="evaluate_dt2_gate",
-                description="Verifies 100% item satisfaction and 90-day validity invariant under DT-2.",
+                description="Checks case evidence against requirements and validity rules explicitly supplied by the bank.",
                 parameters_schema={"type": "object", "properties": {"checklist": {"type": "array"}}},
                 handler="evaluate_completeness"
             ),
             ToolDefinition(
                 name="seal_worm_snapshot",
-                description="Generates immutable SHA-256 cryptographically sealed pack hash under REQ-064.",
+                description="Hashes supplied pack data; this does not provide immutable storage or retention controls.",
                 parameters_schema={"type": "object", "properties": {"pack_data": {"type": "object"}}},
                 handler="seal_snapshot"
             )
